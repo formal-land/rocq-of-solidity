@@ -2414,6 +2414,10 @@ Module Stdlib.
   Definition setimmutable (_offset name value : U256.t) : M.t unit :=
     LowM.Primitive (Primitive.SetImmutable name value) M.pure.
 
+  (** Placeholder address for unlinked libraries in Yul object mode. *)
+  Definition linkersymbol (name : U256.t) : M.t U256.t :=
+    M.pure name.
+
   (** ** Additional functions for the object mode of Yul. *)
   (** We assume that the optimizer does not use any additional memory. *)
   Definition memoryguard (size : U256.t) : M.t U256.t :=
@@ -2540,6 +2544,7 @@ Module Stdlib.
     ("gaslimit", fn [] => return_u256 gaslimit);
     ("loadimmutable", fn [name] => return_u256 (loadimmutable name));
     ("setimmutable", fn [offset; name; value] => return_unit (setimmutable offset name value));
+    ("linkersymbol", fn [name] => return_u256 (linkersymbol name));
     ("memoryguard", fn [p] => return_u256 (memoryguard p));
     ("dataoffset", fn [name] => return_u256 (dataoffset name));
     ("datasize", fn [name] => return_u256 (datasize name));

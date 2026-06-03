@@ -62,6 +62,16 @@ def variable_names_to_rocq(as_pattern: bool, variable_names: list) -> str:
     )
 
 
+def default_zeroes(count: int) -> str:
+    if count == 0:
+        return "tt"
+
+    if count == 1:
+        return "0"
+
+    return "(" + ", ".join(["0"] * count) + ")"
+
+
 def updated_vars_to_rocq(as_pattern: bool, updated_vars: set[str]) -> str:
     return names_to_rocq(as_pattern, sorted(updated_vars))
 
@@ -179,7 +189,7 @@ def statement_to_rocq(node) -> tuple[Callable[[set[str]], str], set[str], set[st
         value = \
             expression_to_rocq(node.get('value')) \
             if node.get('value') is not None \
-            else "0"
+            else default_zeroes(len(variable_names))
         return (
             lambda _:
                 f"let~ {variables} := [[ {value} ]] in",
@@ -251,7 +261,7 @@ def statement_to_rocq(node) -> tuple[Callable[[set[str]], str], set[str], set[st
         return (
             lambda final_updated_vars:
                 "let_state~ " + \
-                updated_vars_to_rocq(True, final_updated_vars) + \
+                updated_vars_to_rocq(True, commonly_updated_vars) + \
                 " := [[\n" + \
                 indent(
                     "(* switch *)\n" + \
@@ -468,7 +478,7 @@ def topological_sort(functions: dict[str, list[str]]) -> list[str]:
         for neighbor in graph[node]:
             if neighbor in path:
                 cycle = list(path)[list(path).index(neighbor):] + [neighbor]
-                print(f"Warning: Cycle detected: {' -> '.join(cycle)}")
+                print(f"Warning: Cycle detected: {' -> '.join(cycle)}", file=sys.stderr)
             elif neighbor not in visited:
                 dfs(neighbor, visited, stack, path)
 
