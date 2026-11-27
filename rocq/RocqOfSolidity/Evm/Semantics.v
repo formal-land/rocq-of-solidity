@@ -425,8 +425,11 @@ Module Gas.
   Definition words_for_size (size : U256.t) : U256.t :=
     words_for_bytes size.
 
+  Definition code_deposit_cost_for_size (size : U256.t) : U256.t :=
+    code_deposit * size.
+
   Definition code_deposit_cost (code : list Z) : U256.t :=
-    code_deposit * Z.of_nat (List.length code).
+    code_deposit_cost_for_size (Z.of_nat (List.length code)).
 
   Definition create_init_code_cost
       (protocol : Protocol.t)
@@ -1307,39 +1310,42 @@ Definition preserve_account_nonce
     end
   end.
 
-Definition deploy_created_code
-    (protocol : Protocol.t)
-    (created : U256.t)
-    (code : list Z)
-    (state : State.t) : option State.t :=
-  if andb
-      (Gas.has_code_size_limit protocol)
-      (Z.of_nat (List.length code) >? Gas.max_code_size) then
-    None
-  else if andb
-      (Gas.rejects_ef_prefix protocol)
-      match code with
-      | 239 :: _ => true
-      | _ => false
-      end then
-    None
-  else match Gas.charge (Gas.code_deposit_cost code) state with
-  | None => None
-  | Some state =>
-    match Dict.assign_function state.(State.accounts) created (fun account =>
-        account
-          <| Account.code := 0 |>
-          <| Account.codedata := code |>
-      ) with
-    | None => None
-    | Some accounts => Some (state <| State.accounts := accounts |>)
+Definition deposit_runtime_code (protocol : Protocol.t) (created size : U256.t)
+    (read_code : unit -> list Z) (state : State.t) : option (U256.t * State.t) :=
+  if Gas.has_code_size_limit protocol && (Gas.max_code_size <? size) then None
+  else match Gas.charge (Gas.code_deposit_cost_for_size size) state with
+  | None =>
+    (* EIP-2 changed an unpaid deposit into a failed creation at Homestead. *)
+    match protocol with
+    | Protocol.Frontier =>
+      option_map (fun _ => (0, state)) (Dict.get state.(State.accounts) created)
+    | _ => None
     end
+  | Some paid =>
+    let code := read_code tt in
+    if Gas.rejects_ef_prefix protocol &&
+        match code with 239 :: _ => true | _ => false end then None
+    else
+      match Dict.assign_function paid.(State.accounts) created (fun account =>
+          account <| Account.code := 0 |> <| Account.codedata := code |>) with
+      | None => None
+      | Some accounts => Some (size, paid <| State.accounts := accounts |>)
+      end
   end.
+
+Definition deploy_created_code (protocol : Protocol.t) (created : U256.t)
+    (code : list Z) (state : State.t) : option State.t :=
+  option_map snd (deposit_runtime_code protocol created (Z.of_nat (List.length code))
+    (fun _ => code) state).
+
+Definition deposit_returned_code (protocol : Protocol.t) (created offset size : U256.t)
+    (state : State.t) : option (U256.t * State.t) :=
+  deposit_runtime_code protocol created size
+    (fun _ => Memory.get_bytes state.(State.memory) offset size) state.
 
 Definition deploy_returned_code (protocol : Protocol.t) (created offset size : U256.t)
     (state : State.t) : option State.t :=
-  if Gas.has_code_size_limit protocol && (Gas.max_code_size <? size) then None
-  else deploy_created_code protocol created (Memory.get_bytes state.(State.memory) offset size) state.
+  option_map snd (deposit_returned_code protocol created offset size state).
 
 Definition execute_create
     (run_call : call_runner)

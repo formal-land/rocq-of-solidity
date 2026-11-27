@@ -82,6 +82,29 @@ Example selfdestructed_miner_is_deleted_after_fee_settlement :
       [96; test_beneficiary; 255])) test_contract = None.
 Proof. vm_compute. reflexivity. Qed.
 
+Definition create_with_deposit_budget (protocol : Protocol.t) (budget : Z) : Fixture.t :=
+  let init := [96; 1; 96; 0; 243] in (* Return one zero byte. *)
+  {| Fixture.name := "creation code deposit";
+     Fixture.protocol := protocol;
+     Fixture.codes := [];
+     Fixture.pre := [Fixture.Alloc.make test_sender 1000000 0 [] [] ];
+     Fixture.block := default_block;
+     Fixture.transaction := Fixture.Transaction.make_create test_sender 7
+       (Gas.intrinsic_transaction_cost protocol true init [] + budget) 1 init;
+     Fixture.steps := 80 |}.
+
+Example creation_code_deposit_at_homestead :
+  let observed protocol budget :=
+    let fixture := create_with_deposit_budget protocol budget in
+    let result := run fixture in
+    (Fixture.error_after result, Fixture.return_data_after result,
+     Fixture.balance_after result (Fixture.created_address fixture)) in
+  (observed Protocol.Frontier 20, observed Protocol.Homestead 20,
+   observed Protocol.Frontier 250) =
+    ((None, Some [], Some 7), (Some "out of gas: code deposit", None, None),
+     (None, Some [0], Some 7)).
+Proof. vm_compute. reflexivity. Qed.
+
 Definition stExample_add11 : Fixture.t :=
   simple_tx_fixture
     "CuratedStateTests/stExample/add11"

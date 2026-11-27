@@ -853,9 +853,9 @@ Definition rollback_top_level_contract_creation
       finalize_successful_transaction fixture
         (rollback_persistent_state before after))
   | (Step.Halt (Halt.Return offset size), after) =>
-    match deploy_returned_code fixture.(protocol) (created_address fixture) offset size after with
-    | Some after =>
-      (Step.Halt (Halt.Return offset size),
+    match deposit_returned_code fixture.(protocol) (created_address fixture) offset size after with
+    | Some (deposited_size, after) =>
+      (Step.Halt (Halt.Return offset deposited_size),
         finalize_successful_transaction fixture after)
     | None =>
       (Step.Error "out of gas: code deposit",
