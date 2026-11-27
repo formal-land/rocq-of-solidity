@@ -3,7 +3,7 @@ name: Rocq
 on:
   workflow_dispatch:
   push:
-    branches: [ "develop" ]
+    branches: [ "ci/verify-release-d76daa0" ]
   pull_request:
     branches: [ "develop" ]
 
@@ -61,7 +61,19 @@ jobs:
               fi
               EVM_FIXTURE_SHARD=${{ matrix.shard }} EVM_FIXTURE_SHARDS=32 make evm-fixtures-full
             else
-              make evm-fixtures-smoke
+              EVM_FIXTURE_JOBS=2 make evm-fixtures-smoke evm-fixtures-osaka
+              python3 - <<'PYTHON'
+          import sys
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          sys.path.insert(0, "../scripts/evm-fixtures")
+          from run import BUILD, PROBES, extract_fixtures, generate
+          with TemporaryDirectory(dir=BUILD) as tmp:
+              root = Path(tmp)
+              extract_fixtures(root)
+              for name in ("Generated", *PROBES):
+                  generate(root, root / name, name)
+          PYTHON
             fi
             cd ../..
           endGroup
