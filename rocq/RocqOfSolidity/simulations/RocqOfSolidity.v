@@ -2717,9 +2717,11 @@ Definition eval_primitive {A : Set}
         |>
       )
   | Primitive.GetGas =>
+    (* The Yul evaluator accounts for a gas observation here. The bytecode
+       runner charges GAS in its opcode dispatcher and reads State.gas directly. *)
     inl (
       state.(State.gas),
-      state
+      state <| State.gas := state.(State.gas) - 1 |>
     )
   | Primitive.GetBlockNumber =>
     inl (
@@ -2788,7 +2790,8 @@ Definition eval_primitive {A : Set}
           else if account.(Account.code) =? 0 then
             account.(Account.codedata)
           else
-            Memory.u256_as_bytes account.(Account.code) ++ account.(Account.codedata)
+            (* A symbolic constructor has no externally visible runtime code. *)
+            []
         else
           if account.(Account.code) =? 0 then
             account.(Account.codedata)
