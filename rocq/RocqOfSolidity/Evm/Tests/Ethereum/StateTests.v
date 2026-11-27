@@ -49,6 +49,34 @@ Definition run (fixture : Fixture.t) : Step.t * State.t :=
 Definition storage_at_test_contract (fixture : Fixture.t) (slot : U256.t) : option U256.t :=
   Fixture.storage_after (run fixture) test_contract slot.
 
+Definition miner_settlement_fixture
+    (protocol : Protocol.t) (miner price : Z) (code : list Z) : Fixture.t := {|
+  Fixture.name := "miner settlement";
+  Fixture.protocol := protocol;
+  Fixture.codes := [];
+  Fixture.pre := [
+    Fixture.Alloc.make test_contract 0 1 code [];
+    Fixture.Alloc.make test_sender 1000000 0 [] []
+  ];
+  Fixture.block := Fixture.BlockEnv.make miner 90000000 1 1000 0 0 0 1 [];
+  Fixture.transaction := Fixture.Transaction.make test_sender test_contract 0 100000 price [];
+  Fixture.steps := 80;
+|}.
+
+Example zero_fee_miner_before_and_after_empty_account_clearing :
+  let balance protocol :=
+    Fixture.balance_after (run (miner_settlement_fixture protocol test_beneficiary 0 [0]))
+      test_beneficiary in
+  (balance Protocol.Frontier, balance Protocol.Homestead, balance Protocol.Byzantium) =
+    (Some 0, Some 0, None).
+Proof. vm_compute. reflexivity. Qed.
+
+Example selfdestructed_miner_is_deleted_after_fee_settlement :
+  Fixture.balance_after
+    (run (miner_settlement_fixture Protocol.Homestead test_contract 1
+      [96; test_beneficiary; 255])) test_contract = None.
+Proof. vm_compute. reflexivity. Qed.
+
 Definition stExample_add11 : Fixture.t :=
   simple_tx_fixture
     "CuratedStateTests/stExample/add11"

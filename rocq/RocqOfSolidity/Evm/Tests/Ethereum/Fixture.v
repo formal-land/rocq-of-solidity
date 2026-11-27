@@ -280,23 +280,28 @@ Definition transaction_fee_cap_cost (transaction : Transaction.t) : U256.t :=
 
 Definition blob_gas_per_blob : U256.t := 131072.
 
+Definition credit_transaction_account (protocol : Protocol.t)
+    (accounts : list (U256.t * Account.t))
+    (address value : U256.t) : list (U256.t * Account.t) :=
+  match protocol, value with
+  | (Protocol.Frontier | Protocol.Homestead), 0 =>
+    match Dict.get accounts address with
+    | None => (address, empty_value_transfer_account 0) :: accounts
+    | Some _ => accounts
+    end
+  | _, _ => credit_account accounts address value
+  end.
+
 Definition transfer_transaction_value (protocol : Protocol.t)
     (accounts : list (U256.t * Account.t))
     (transaction : Transaction.t) :
     option (list (U256.t * Account.t)) :=
   let value := transaction.(Transaction.value) in
-  if value =? 0 then
-    match protocol, Dict.get accounts transaction.(Transaction.to) with
-    | (Protocol.Frontier | Protocol.Homestead), None =>
-      Some ((transaction.(Transaction.to), empty_value_transfer_account 0) :: accounts)
-    | _, _ => Some accounts
-    end
-  else
-    match debit_account accounts transaction.(Transaction.caller) value with
-    | None => None
-    | Some accounts =>
-      Some (credit_account accounts transaction.(Transaction.to) value)
-    end.
+  match debit_account accounts transaction.(Transaction.caller) value with
+  | None => None
+  | Some accounts =>
+    Some (credit_transaction_account protocol accounts transaction.(Transaction.to) value)
+  end.
 
 Definition created_account_initial_nonce (protocol : Protocol.t) : Z :=
   match protocol with
@@ -788,8 +793,8 @@ Definition finalize_transaction_with_remaining_gas
   let coinbase_reward := gas_used * coinbase_gas_price fixture in
   state
     <| State.accounts :=
-      credit_account
-        (credit_account
+      credit_transaction_account fixture.(protocol)
+        (credit_transaction_account fixture.(protocol)
           state.(State.accounts)
           transaction.(Transaction.caller)
           sender_refund)
@@ -802,10 +807,9 @@ Definition finalize_transaction_with_remaining_gas
 Definition finalize_successful_transaction
     (fixture : t)
     (state : State.t) : State.t :=
-  let state := finalize_selfdestructs state in
-  finalize_transaction_with_remaining_gas fixture
+  finalize_selfdestructs (finalize_transaction_with_remaining_gas fixture
     (remaining_transaction_gas fixture state)
-    state.
+    state).
 
 Definition finalize_exceptional_transaction
     (fixture : t)
