@@ -1209,6 +1209,9 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
             storage=rocq_account_storage_options(case.account_assertions),
         )
         return "\n".join([*fixture_lines, *error_assertion, proof])
+    # EEST marks high-memory cases, including megabytes of repeated calldata.
+    # The VM evaluates their gas costs without retaining lazy reduction thunks.
+    reduction = "vm_compute" if "bigmem" in case.test_name.split("@")[1:] else "lazy"
     return "\n".join(
         [
             *fixture_lines,
@@ -1240,7 +1243,7 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
             "",
             f"Example test_{case.case_id}_post :",
             "  observed_after result = expected_after.",
-            "Proof. lazy. reflexivity. Qed.",
+            f"Proof. {reduction}. reflexivity. Qed.",
             "",
         ]
     )

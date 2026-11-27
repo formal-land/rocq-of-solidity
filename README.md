@@ -102,7 +102,7 @@ Run these fixture targets from `rocq/RocqOfSolidity/` under `opam exec`.
 | --- | --- |
 | `make evm-fixtures-smoke` | Six allowlisted cases used in pull requests |
 | `make evm-fixtures-full` | All 39,476 cases in the imported manifest |
-| `make evm-fixtures-osaka` | 32 official Osaka state tests from execution-specs tests@v21.0.0 |
+| `make evm-fixtures-osaka` | 38 official Osaka state tests from execution-specs tests@v21.0.0 |
 | `make evm-fixtures-probes` | 280 precompile probes and 606 static-call probes, with their original assertions |
 
 The main, smoke and probe targets use the EEST v5.4.0 stable archive. The
