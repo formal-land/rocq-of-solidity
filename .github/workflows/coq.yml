@@ -55,6 +55,10 @@ jobs:
             make
             python3 ../scripts/evm_tests_generate_test.py
             if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+              export EVM_FIXTURE_JOBS=2
+              if [ "${{ matrix.shard }}" = 0 ]; then
+                make evm-fixtures-osaka
+              fi
               EVM_FIXTURE_SHARD=${{ matrix.shard }} EVM_FIXTURE_SHARDS=32 make evm-fixtures-full
             else
               make evm-fixtures-smoke

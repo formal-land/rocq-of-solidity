@@ -113,7 +113,7 @@ results are in `build/evm-fixtures/`. Rerunning a target resumes successful
 proofs. Each compiler process has a 6 GiB address-space limit, up to 128 MiB of stack,
 and a 15-minute timeout. The default is one worker. Set `EVM_FIXTURE_JOBS` to increase parallelism
 when sufficient memory is available. Manually running the **Rocq** workflow
-checks the full suite in 32 shards.
+checks the full historical suite in 32 shards and runs the Osaka fixtures once.
 
 The pinned suite definitions use inclusive case ranges in the archive’s
 sorted JSON path order, then each JSON object's original test, fork, and post
