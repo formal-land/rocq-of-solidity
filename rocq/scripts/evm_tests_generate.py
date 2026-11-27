@@ -137,6 +137,7 @@ class GeneratedCase:
     account_assertions: list[AccountAssertion]
     expected_error: str | None
     chain_id: int = 1
+    authorizations: tuple[tuple[int, int, int, int, int, int], ...] = ()
 
 
 def parse_args() -> argparse.Namespace:
@@ -281,19 +282,22 @@ def transaction_blob_gas_fee_cap(transaction: dict[str, Any]) -> int:
     return parse_hex_int(transaction.get("maxFeePerBlobGas", "0x00"))
 
 
+def transaction_authorizations(transaction: dict[str, Any]) -> tuple[tuple[int, int, int, int, int, int], ...]:
+    entries = []
+    for auth in transaction.get("authorizationList", []):
+        address = parse_hex_bytes(auth["address"])
+        if len(address) != 20:
+            raise FixtureError("authorization address must contain exactly 20 bytes")
+        parity = auth["yParity"] if "yParity" in auth else auth["v"]
+        entries.append((parse_hex_int(auth["chainId"]), int.from_bytes(bytes(address), "big"),
+                        parse_hex_int(auth["nonce"]), parse_hex_int(parity),
+                        parse_hex_int(auth["r"]), parse_hex_int(auth["s"])))
+    return tuple(entries)
+
+
 def transaction_kind_constructor(transaction: dict[str, Any]) -> str:
     if "authorizationList" in transaction:
-        entries = []
-        for auth in transaction["authorizationList"]:
-            address = parse_hex_bytes(auth["address"])
-            if len(address) != 20:
-                raise FixtureError("authorization address must contain exactly 20 bytes")
-            parity = auth["yParity"] if "yParity" in auth else auth["v"]
-            fields = [parse_hex_int(auth["chainId"]), int.from_bytes(bytes(address), "big"),
-                      parse_hex_int(auth["nonce"]), parse_hex_int(parity),
-                      parse_hex_int(auth["r"]), parse_hex_int(auth["s"])]
-            entries.append("Fixture.Authorization.make " + " ".join(map(str, fields)))
-        return "(Fixture.TransactionKind.SetCode [" + ";\n      ".join(entries) + "])"
+        return "Fixture.TransactionKind.SetCode"
     if "maxFeePerBlobGas" in transaction or "blobVersionedHashes" in transaction:
         return "Fixture.TransactionKind.Blob"
     if "maxFeePerGas" in transaction or "maxPriorityFeePerGas" in transaction:
@@ -848,6 +852,7 @@ def build_case_from_fixture(
         ),
         blob_hashes=transaction_blob_hashes(transaction),
         transaction_kind=transaction_kind_constructor(transaction),
+        authorizations=transaction_authorizations(transaction),
         nonce=parse_hex_int(transaction.get("nonce", "0x00")),
         sender=sender,
         to=to,
@@ -1133,10 +1138,15 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
                   check_success: bool = False, *, use_vm: bool = False) -> str:
     pre = ";\n".join(rocq_alloc(address, account) for address, account in case.pre)
     emitted_data = emitted_transaction_data(case)
+    kind = case.transaction_kind
+    if kind == "Fixture.TransactionKind.SetCode":
+        entries = ["Fixture.Authorization.make " + " ".join(map(str, fields))
+                   for fields in case.authorizations]
+        kind = "(" + kind + " [" + ";\n      ".join(entries) + "])"
     if case.is_create:
         transaction_lines = [
             "  Fixture.transaction := Fixture.Transaction.make_create_kind_with_nonce_fee_caps_access_list",
-            f"    {case.transaction_kind}",
+            f"    {kind}",
             f"    {case.nonce}",
             f"    {case.sender}",
             f"    {case.value}",
@@ -1152,7 +1162,7 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
     else:
         transaction_lines = [
             "  Fixture.transaction := Fixture.Transaction.make_kind_with_nonce_fee_caps_access_list",
-            f"    {case.transaction_kind}",
+            f"    {kind}",
             f"    {case.nonce}",
             f"    {case.sender}",
             f"    {case.to}",
@@ -1232,6 +1242,11 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
     # EEST marks high-memory cases, including megabytes of repeated calldata.
     # The VM evaluates their gas costs without retaining lazy reduction thunks.
     reduction = "vm_compute" if use_vm or "bigmem" in case.test_name.split("@")[1:] else "lazy"
+    proof = f"Proof. {reduction}. reflexivity. Qed."
+    if case.authorizations:
+        # The kernel performs VM conversion at Qed. Evaluating the same
+        # transaction during tactic execution doubles signature recovery work.
+        proof = "Proof. vm_cast_no_check (eq_refl expected_after). Qed."
     return "\n".join(
         [
             *fixture_lines,
@@ -1263,7 +1278,7 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
             "",
             f"Example test_{case.case_id}_post :",
             "  observed_after result = expected_after.",
-            f"Proof. {reduction}. reflexivity. Qed.",
+            proof,
             "",
         ]
     )
