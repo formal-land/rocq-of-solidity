@@ -150,6 +150,27 @@ Module Environment.
     block_blob_base_fee : U256.t;
     blob_hashes : list U256.t;
   }.
+  (** Block and transaction constants used by the Solidity semantic test harness. *)
+  Definition solidity_test (caller value : U256.t) (data : list Z)
+      (address code : U256.t) : t := {|
+    protocol := Protocol.default;
+    caller := caller;
+    origin := 0x9292929292929292929292929292929292929292;
+    callvalue := value;
+    gas_price := 3000000000;
+    calldata := data;
+    address := address;
+    code_name := code;
+    chain_id := 1;
+    block_coinbase := 0x7878787878787878787878787878787878787878;
+    block_gas_limit := 20000000;
+    block_difficulty := 0xa86c2e601b6c44eb4848f7d23d9df3113fbcac42041c49cbed5000cb4f118777;
+    block_prev_randao := 0xa86c2e601b6c44eb4848f7d23d9df3113fbcac42041c49cbed5000cb4f118777;
+    block_base_fee := 7;
+    block_blob_base_fee := 1;
+    blob_hashes := [0x0100000000000000000000000000000000000000000000000000000000000001;
+                    0x0100000000000000000000000000000000000000000000000000000000000002];
+  |}.
 End Environment.
 
 Module BlockUnit.
