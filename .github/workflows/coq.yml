@@ -3,7 +3,7 @@ name: Rocq
 on:
   workflow_dispatch:
   push:
-    branches: [ "develop" ]
+    branches: [ "develop", "ci/verify-authorization-990e925" ]
   pull_request:
     branches: [ "develop" ]
 
@@ -12,13 +12,13 @@ env:
 
 jobs:
   build:
-    name: ${{ github.event_name == 'workflow_dispatch' && format('Full fixture shard {0}', matrix.shard) || 'build' }}
+    name: ${{ (github.event_name == 'workflow_dispatch' || github.ref_name == 'ci/verify-authorization-990e925') && format('Full fixture shard {0}', matrix.shard) || 'build' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       max-parallel: 8
       matrix:
-        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]' || '[0]') }}
+        shard: ${{ fromJSON((github.event_name == 'workflow_dispatch' || github.ref_name == 'ci/verify-authorization-990e925') && '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]' || '[0]') }}
 
     steps:
     - uses: actions/checkout@v6
@@ -54,7 +54,7 @@ jobs:
             cd rocq/RocqOfSolidity
             make
             python3 ../scripts/evm_tests_generate_test.py
-            if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            if [ "${{ github.event_name }}" = workflow_dispatch ] || [ "${{ github.ref_name }}" = ci/verify-authorization-990e925 ]; then
               export EVM_FIXTURE_JOBS=2
               if [ "${{ matrix.shard }}" = 0 ]; then
                 make evm-fixtures-osaka
