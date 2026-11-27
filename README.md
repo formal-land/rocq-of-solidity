@@ -102,12 +102,14 @@ Run these fixture targets from `rocq/RocqOfSolidity/` under `opam exec`.
 | --- | --- |
 | `make evm-fixtures-smoke` | Six allowlisted cases used in pull requests |
 | `make evm-fixtures-full` | All 39,476 cases in the imported manifest |
-| `make evm-fixtures-osaka` | 38 official Osaka state tests from execution-specs tests@v21.0.0 |
+| `make evm-fixtures-osaka` | 1,225 official Osaka state tests from execution-specs tests@v21.0.0 |
 | `make evm-fixtures-probes` | 280 precompile probes and 606 static-call probes, with their original assertions |
 
 The main, smoke and probe targets use the EEST v5.4.0 stable archive. The
-Osaka target checks the transaction gas and blob limits, MODEXP pricing and
-operand sizes, CLZ, and P-256 signatures against the tests@v21.0.0 archive.
+Osaka target reads all 1,231 post-states in the release’s Osaka-specific
+state-test directory. It checks transaction gas and blob limits, MODEXP pricing
+and operand sizes, CLZ, and P-256 signatures. It reports the six cases that use
+EIP-7702 authorization lists, a transaction type outside the fixture model.
 For new Osaka state tests, the generator reads the current excess blob gas
 or derives it from parent-header fields using the EIP-7918 reserve price.
 Each target verifies its download or a local copy supplied through `EEST_ARCHIVE`. Generated modules and per-case JSONL
@@ -120,7 +122,7 @@ checks the full historical suite in 32 shards and runs the Osaka fixtures once.
 The historical suites use inclusive ranges in the archive’s sorted JSON path
 order, followed by each JSON object’s original test, fork, and post order.
 Their digests come from the fixture trees at fork commit `40651b12f8`.
-The Osaka suite selects fixture paths and reads their Osaka post-states.
+The Osaka suite traverses JSON files in sorted path order and reads their Osaka post-states.
 Each suite SHA-256 covers its case filenames and contents in sorted filename
 order. The probe manifests import their own modules.
 

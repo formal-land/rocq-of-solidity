@@ -63,14 +63,7 @@
     ]
   },
   "GeneratedOsaka": {
-    "paths": [
-      "*/eip_mainnet/*.json",
-      "eip7594_peerdas/max_blob_per_tx/*.json",
-      "eip7825_transaction_gas_limit_cap/tx_gas_limit/tx_gas_limit_cap_full_calldata.json",
-      "eip7951_p256verify_precompiles/p256verify/modular_comparison.json",
-      "eip7951_p256verify_precompiles/p256verify/precompile_as_tx_entry_point.json",
-      "eip7951_p256verify_precompiles/p256verify/call_types.json"
-    ],
-    "sha256": "e72523401fbfb3fec36c92882db4181f8a5bc3942afcb0398dbe1a87019ec6e1"
+    "authorization_list_cases": 6,
+    "sha256": "485a412430c347f347b58253a03c37ed920aaaa9ab813cdb0ab2ff5e6bbb6943"
   }
 }

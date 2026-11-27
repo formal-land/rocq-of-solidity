@@ -92,6 +92,10 @@ class FixtureError(Exception):
     pass
 
 
+class UnsupportedAuthorizationList(FixtureError):
+    pass
+
+
 @dataclass(frozen=True)
 class AccountAssertion:
     address: int
@@ -685,6 +689,7 @@ def build_case_from_fixture(
     *,
     pinned_case: bool = False,
     include_nested_budget: bool = True,
+    cap_step_hint: bool = False,
 ) -> GeneratedCase:
     case_id = sanitize_identifier(entry["id"])
     fixture_file = entry["file"]
@@ -725,7 +730,9 @@ def build_case_from_fixture(
     ):
         expected_error = "invalid transaction: sender account not found"
     if "authorizationList" in transaction:
-        raise FixtureError("EIP-7702 authorization-list transactions are not generated in this pass")
+        raise UnsupportedAuthorizationList(
+            "EIP-7702 authorization-list transactions are not generated in this pass"
+        )
     to_raw = transaction["to"]
     is_create = to_raw == ""
     indexes = post["indexes"]
@@ -803,7 +810,10 @@ def build_case_from_fixture(
         loop_bound_hint,
         storage_assertion_count + len(account_assertions),
     )
-    if steps > MAX_ROCQ_EVALUATION_STEPS and not pinned_case:
+    if cap_step_hint:
+        # Frame gas bounds opcode execution. The hint supplies recursive fuel.
+        steps = min(steps, MAX_ROCQ_EVALUATION_STEPS)
+    elif steps > MAX_ROCQ_EVALUATION_STEPS and not pinned_case:
         raise FixtureError(ROCQ_EVALUATION_SPEED_SKIP_REASON)
 
     return GeneratedCase(
@@ -1111,7 +1121,7 @@ def rocq_alloc(address: int, account: dict[str, Any]) -> str:
 
 
 def generate_case(case: GeneratedCase, proof_template: Template | None = None,
-                  check_success: bool = False) -> str:
+                  check_success: bool = False, *, use_vm: bool = False) -> str:
     pre = ";\n".join(rocq_alloc(address, account) for address, account in case.pre)
     emitted_data = emitted_transaction_data(case)
     if case.is_create:
@@ -1211,7 +1221,7 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
         return "\n".join([*fixture_lines, *error_assertion, proof])
     # EEST marks high-memory cases, including megabytes of repeated calldata.
     # The VM evaluates their gas costs without retaining lazy reduction thunks.
-    reduction = "vm_compute" if "bigmem" in case.test_name.split("@")[1:] else "lazy"
+    reduction = "vm_compute" if use_vm or "bigmem" in case.test_name.split("@")[1:] else "lazy"
     return "\n".join(
         [
             *fixture_lines,

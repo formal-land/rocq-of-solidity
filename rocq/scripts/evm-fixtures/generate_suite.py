@@ -32,19 +32,25 @@ def selected_cases(root, ranges, include_nested_budget):
                     index += 1
 
 
-def osaka_cases(root, patterns):
+def osaka_cases(root, expected_authorization_cases):
     directory = root / "fixtures/state_tests/for_osaka/osaka"
-    for pattern in patterns:
-        paths = sorted(directory.glob(pattern))
-        if not paths:
-            raise ValueError(f"missing Osaka fixture group {pattern}")
-        for path in paths:
-            file = gen.fixture_relative_path(root, path)
-            for test, fixture in gen.read_json(path).items():
-                for post in range(len(fixture["post"]["Osaka"])):
-                    entry = dict(id=gen.discovered_identifier(file, test, "Osaka", post),
-                                 file=file, test=test, fork="Osaka", post_index=post)
-                    yield gen.build_case_from_fixture(1000, entry, fixture)
+    authorization_cases = 0
+    for path in sorted(directory.rglob("*.json")):
+        file = gen.fixture_relative_path(root, path)
+        for test, fixture in gen.read_json(path).items():
+            for post in range(len(fixture["post"]["Osaka"])):
+                entry = dict(id=gen.discovered_identifier(file, test, "Osaka", post),
+                             file=file, test=test, fork="Osaka", post_index=post)
+                try:
+                    case = gen.build_case_from_fixture(1000, entry, fixture, cap_step_hint=True)
+                except gen.UnsupportedAuthorizationList:
+                    authorization_cases += 1
+                    print(f"Unsupported authorization-list transaction: {entry['id']}", flush=True)
+                    continue
+                yield case
+    if authorization_cases != expected_authorization_cases:
+        raise ValueError(f"expected {expected_authorization_cases} authorization-list cases, "
+                         f"found {authorization_cases}")
 
 
 def generate(root, out, name, smoke=False):
@@ -53,7 +59,7 @@ def generate(root, out, name, smoke=False):
         allowlist = gen.read_json(gen.DEFAULT_ALLOWLIST)
         cases = (gen.build_case(root, allowlist["default_steps"], e) for e in allowlist["cases"])
     elif name == "GeneratedOsaka":
-        cases = osaka_cases(root, suite["paths"])
+        cases = osaka_cases(root, suite["authorization_list_cases"])
     else:
         cases = selected_cases(root, suite["ranges"], name == "GeneratedStStaticProbeNew")
     template_path = HERE / (name + ".v.in")
@@ -65,7 +71,9 @@ def generate(root, out, name, smoke=False):
         filename = case.case_id + ".v"
         if filename in hashes:
             raise ValueError(f"duplicate fixture {filename}")
-        content = gen.generate_case(case, template, name == "GeneratedStPre2Probe").encode()
+        content = gen.generate_case(
+            case, template, name == "GeneratedStPre2Probe", use_vm=name == "GeneratedOsaka"
+        ).encode()
         path = out / filename
         if not path.exists() or path.read_bytes() != content:
             path.write_bytes(content)
