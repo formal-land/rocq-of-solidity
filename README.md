@@ -89,6 +89,31 @@ To build the tests, you need to:
 
 We do not support yet all the semantic tests but around 90% and are working on the remaining ones.
 
+### Run all Rocq tests
+
+To run the solc-derived Rocq tests from the repository root:
+
+```sh
+cd rocq
+opam exec -- python scripts/tests_compile.py -j 8
+```
+
+This command uses `rocq/scripts/tests_blacklist.txt` for unsupported generated
+solc tests.
+
+To run the RocqOfSolidity and EVM tests, including generated Ethereum fixtures,
+from the repository root:
+
+```sh
+cd rocq/RocqOfSolidity
+bash -lc 'ulimit -v 6291456; opam exec -- make -j8 -k all'
+```
+
+This command uses `rocq/RocqOfSolidity/blacklist.txt`. The generated Ethereum
+fixtures can be CPU and memory intensive; use the bounded triage workflow in
+[`Verification.md`](rocq/RocqOfSolidity/Evm/Tests/Ethereum/Verification.md) for
+fixture timeouts, memory-cap failures, or semantic mismatches.
+
 ## 📚 Example
 
 Here is what the Rocq translation looks like for an example of Solidity code:

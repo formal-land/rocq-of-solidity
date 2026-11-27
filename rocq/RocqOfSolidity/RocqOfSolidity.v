@@ -57,16 +57,98 @@ Module Address.
   End Valid.
 End Address.
 
+Module Protocol.
+  Inductive t : Set :=
+  | Frontier
+  | Homestead
+  | Byzantium
+  | ConstantinopleFix
+  | Istanbul
+  | Berlin
+  | London
+  | Paris
+  | Shanghai
+  | Cancun
+  | Prague
+  | Osaka.
+
+  Definition default : t := Osaka.
+
+  Definition has_chainid (protocol : t) : bool :=
+    match protocol with
+    | Frontier | Homestead | Byzantium | ConstantinopleFix => false
+    | Istanbul | Berlin | London | Paris | Shanghai | Cancun | Prague | Osaka => true
+    end.
+
+  Definition has_byzantium_opcodes (protocol : t) : bool :=
+    match protocol with
+    | Frontier | Homestead => false
+    | Byzantium | ConstantinopleFix | Istanbul | Berlin | London | Paris
+    | Shanghai | Cancun | Prague | Osaka => true
+    end.
+
+  Definition has_constantinople_opcodes (protocol : t) : bool :=
+    match protocol with
+    | Frontier | Homestead | Byzantium => false
+    | ConstantinopleFix | Istanbul | Berlin | London | Paris | Shanghai
+    | Cancun | Prague | Osaka => true
+    end.
+
+  Definition has_istanbul_opcodes (protocol : t) : bool :=
+    has_chainid protocol.
+
+  Definition has_basefee (protocol : t) : bool :=
+    match protocol with
+    | Frontier | Homestead | Byzantium | ConstantinopleFix | Istanbul | Berlin => false
+    | London | Paris | Shanghai | Cancun | Prague | Osaka => true
+    end.
+
+  Definition has_prevrandao (protocol : t) : bool :=
+    match protocol with
+    | Frontier | Homestead | Byzantium | ConstantinopleFix | Istanbul | Berlin | London => false
+    | Paris | Shanghai | Cancun | Prague | Osaka => true
+    end.
+
+  Definition has_push0 (protocol : t) : bool :=
+    match protocol with
+    | Frontier | Homestead | Byzantium | ConstantinopleFix | Istanbul | Berlin | London | Paris => false
+    | Shanghai | Cancun | Prague | Osaka => true
+    end.
+
+  Definition has_cancun_opcodes (protocol : t) : bool :=
+    match protocol with
+    | Cancun | Prague | Osaka => true
+    | _ => false
+    end.
+
+  Definition has_osaka_opcodes (protocol : t) : bool :=
+    match protocol with
+    | Osaka => true
+    | _ => false
+    end.
+End Protocol.
+
 Module Environment.
   Record t : Set := {
+    protocol : Protocol.t;
     caller : U256.t;
+    origin : U256.t;
     (** Amount of wei sent to the current contract *)
     callvalue : U256.t;
+    gas_price : U256.t;
     calldata : list Z;
     (** The address of the contract. *)
     address : U256.t;
     (** The name of the current code that is being executed. *)
     code_name : U256.t;
+    chain_id : U256.t;
+    block_coinbase : U256.t;
+    block_gas_limit : U256.t;
+    block_difficulty : U256.t;
+    block_prev_randao : U256.t;
+    block_base_fee : U256.t;
+    block_blob_base_fee : U256.t;
+    blob_hashes : list U256.t;
   }.
 End Environment.
 
@@ -122,6 +204,7 @@ Module Primitive.
   | GetBlockNumber : t U256.t
   | GetBlockTimestamp : t U256.t
   | Log (topics : list U256.t) (payload : list Z) : t unit
+  | LogMemory (topics : list U256.t) (offset size : U256.t) : t unit
   | GetEnvironment : t Environment.t
   | GetNonce : t U256.t
   | GetCodedata (address : U256.t) : t (list Z)

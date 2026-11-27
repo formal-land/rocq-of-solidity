@@ -36,6 +36,7 @@ Inductive instruction :=
 | SHL
 | SHR
 | SAR
+| CLZ
 
 (* 0x20 *)
 | SHA3
@@ -67,6 +68,9 @@ Inductive instruction :=
 | GASLIMIT
 | CHAINID (* https://eips.ethereum.org/EIPS/eip-1344 *)
 | SELFBALANCE
+| BASEFEE
+| BLOBHASH
+| BLOBBASEFEE
 
 (* 0x50 *)
 | POP
@@ -81,6 +85,10 @@ Inductive instruction :=
 | MSIZE
 | GAS
 | JUMPDEST
+| TLOAD
+| TSTORE
+| MCOPY
+| PUSH0
 
 (* 0x60 *)
 | PUSH (n: N) (ok: andb (0 <? n) (n <=? 32) = true)
@@ -208,6 +216,7 @@ Definition byte_of_instruction (op: instruction)
    | SHL    => x x1 xB
    | SHR    => x x1 xC
    | SAR    => x x1 xD
+   | CLZ    => x x1 xE
 
    (* 0x20 *)
    | SHA3 => x x2 x0
@@ -239,6 +248,9 @@ Definition byte_of_instruction (op: instruction)
    | GASLIMIT    => x x4 x5
    | CHAINID     => x x4 x6
    | SELFBALANCE => x x4 x7
+   | BASEFEE     => x x4 x8
+   | BLOBHASH    => x x4 x9
+   | BLOBBASEFEE => x x4 xA
 
    (* 0x50 *)
    | POP      => x x5 x0
@@ -253,6 +265,10 @@ Definition byte_of_instruction (op: instruction)
    | MSIZE    => x x5 x9
    | GAS      => x x5 xA
    | JUMPDEST => x x5 xB
+   | TLOAD    => x x5 xC
+   | TSTORE   => x x5 xD
+   | MCOPY    => x x5 xE
+   | PUSH0    => x x5 xF
 
    (* 0x60 *)
    | PUSH n ok => opcode_of_push n ok
@@ -314,6 +330,7 @@ Definition instruction_of_byte (b: byte)
       | xB => Some SHL
       | xC => Some SHR
       | xD => Some SAR
+      | xE => Some CLZ
       | _ => None
       end
    | x2 =>
@@ -350,6 +367,9 @@ Definition instruction_of_byte (b: byte)
       | x5 => Some GASLIMIT
       | x6 => Some CHAINID
       | x7 => Some SELFBALANCE
+      | x8 => Some BASEFEE
+      | x9 => Some BLOBHASH
+      | xA => Some BLOBBASEFEE
       | _ => None
       end
     | x5 =>
@@ -366,7 +386,10 @@ Definition instruction_of_byte (b: byte)
       | x9 => Some MSIZE
       | xA => Some GAS
       | xB => Some JUMPDEST
-      | _ => None
+      | xC => Some TLOAD
+      | xD => Some TSTORE
+      | xE => Some MCOPY
+      | xF => Some PUSH0
       end
     | x6 => Some (x6_to_push low)
     | x7 => Some (x7_to_push low)
@@ -586,6 +609,7 @@ Definition consume_and_produce_count (op: instruction)
    | SHL    => (2, 1)
    | SHR    => (2, 1)
    | SAR    => (2, 1)
+   | CLZ    => (1, 1)
 
    (* 0x20 *)
    | SHA3 => (2, 1)
@@ -617,6 +641,9 @@ Definition consume_and_produce_count (op: instruction)
    | GASLIMIT    => (0, 1)
    | CHAINID     => (0, 1)
    | SELFBALANCE => (0, 1)
+   | BASEFEE     => (0, 1)
+   | BLOBHASH    => (1, 1)
+   | BLOBBASEFEE => (0, 1)
 
    (* 0x50 *)
    | POP      => (1, 0)
@@ -631,6 +658,10 @@ Definition consume_and_produce_count (op: instruction)
    | MSIZE    => (0, 1)
    | GAS      => (0, 1)
    | JUMPDEST => (0, 0)
+   | TLOAD    => (1, 1)
+   | TSTORE   => (2, 0)
+   | MCOPY    => (3, 0)
+   | PUSH0    => (0, 1)
 
    (* 0x60 *)
    | PUSH n ok => (0, 1)

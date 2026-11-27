@@ -1,7 +1,11 @@
 Require Import RocqOfSolidity.RocqOfSolidity.
+From RocqOfSolidity Require UInt64 Vec8 Vec16.
+Require RocqOfSolidity.RocqEvm.Crypto.BLAKE2b.
 Require RocqOfSolidity.RocqEvm.Crypto.Keccak.
 Require RocqOfSolidity.RocqEvm.Crypto.RIPEMD160.
 Require RocqOfSolidity.RocqEvm.Crypto.SHA256.
+Require Import Coq.ZArith.Znumtheory.
+From Bignums Require Import BigN.BigN.
 
 (** We should probably use an existing library for the [Dict.t] definition. We have mainly two kinds
     of keys in our code:
@@ -249,8 +253,47 @@ Module Memory.
   Definition t : Set :=
     U256.t -> Z.
 
+  Inductive byte_tree : Set :=
+  | Empty
+  | Leaf (address : U256.t) (byte : Z)
+  | Node (split : U256.t) (left_tree right_tree : byte_tree).
+
   Definition empty : t :=
     fun _ => 0.
+
+  Fixpoint byte_tree_of_bytes_fuel
+      (fuel : nat)
+      (start : U256.t)
+      (bytes : list Z) : byte_tree :=
+    match fuel with
+    | O => Empty
+    | S fuel' =>
+      match bytes with
+      | [] => Empty
+      | byte :: [] => Leaf start byte
+      | _ =>
+        let left_size := Nat.div2 (List.length bytes) in
+        let split := start + Z.of_nat left_size in
+        Node split
+          (byte_tree_of_bytes_fuel fuel' start (List.firstn left_size bytes))
+          (byte_tree_of_bytes_fuel fuel' split (List.skipn left_size bytes))
+      end
+    end.
+
+  Definition byte_tree_of_bytes (start : U256.t) (bytes : list Z) : byte_tree :=
+    byte_tree_of_bytes_fuel (List.length bytes) start bytes.
+
+  Fixpoint byte_tree_lookup (tree : byte_tree) (address : U256.t) : option Z :=
+    match tree with
+    | Empty => None
+    | Leaf current byte =>
+      if address =? current then Some byte else None
+    | Node split left_tree right_tree =>
+      if address <? split then
+        byte_tree_lookup left_tree address
+      else
+        byte_tree_lookup right_tree address
+    end.
 
   (** Get the bytes from some memory from a start adress and for a certain length. *)
   Definition get_bytes (memory : Memory.t) (start length : U256.t) : list Z :=
@@ -262,17 +305,29 @@ Module Memory.
       (List.seq 0 (Z.to_nat length)).
 
   Definition update_bytes (memory : Memory.t) (start : U256.t) (bytes : list Z) : Memory.t :=
+    let tree := byte_tree_of_bytes start bytes in
     fun address =>
-      let i : Z := address - start in
-      if andb (0 <=? i) (i <? Z.of_nat (List.length bytes)) then
-        List.nth_default 0 bytes (Z.to_nat i)
-      else
-        memory address.
+      match byte_tree_lookup tree address with
+      | Some byte => byte
+      | None =>
+        memory address
+      end.
 
   Definition u256_as_bytes (value : U256.t) : list Z :=
     List.map
       (fun (i : nat) => Z.shiftr value (8 * (31 - Z.of_nat i)) mod 256)
       (List.seq 0 32).
+
+  Definition z_as_bytes (length value : U256.t) : list Z :=
+    if length <=? 0 then
+      []
+    else
+      let n := Z.to_nat length in
+      List.map
+        (fun (i : nat) =>
+          Z.shiftr value (8 * Z.of_nat ((n - S i)%nat)) mod 256
+        )
+        (List.seq 0 n).
 
   Fixpoint bytes_as_u256_aux (acc : Z) (bytes : list Z) : U256.t :=
     match bytes with
@@ -311,6 +366,70 @@ Module Memory.
     end.
 End Memory.
 
+Module ReturnData.
+  Inductive t : Set :=
+  | Bytes (bytes : list Z)
+  | MemorySlice (memory : Memory.t) (offset length : U256.t).
+
+  Definition empty : t := Bytes [].
+
+  Definition of_bytes (bytes : list Z) : t := Bytes bytes.
+
+  Definition of_memory (memory : Memory.t) (offset length : U256.t) : t :=
+    MemorySlice memory offset length.
+
+  Definition length (return_data : t) : U256.t :=
+    match return_data with
+    | Bytes bytes => Z.of_nat (List.length bytes)
+    | MemorySlice _ _ length => length
+    end.
+
+  Definition get_bytes
+      (return_data : t) (offset size : U256.t) : list Z :=
+    match return_data with
+    | Bytes bytes =>
+      List.map
+        (fun (i : nat) =>
+          let index : nat := (Z.to_nat offset + i)%nat in
+          List.nth_default 0 bytes index
+        )
+        (List.seq 0 (Z.to_nat size))
+    | MemorySlice memory start _ =>
+      Memory.get_bytes memory (start + offset) size
+    end.
+
+  Definition to_list (return_data : t) : list Z :=
+    get_bytes return_data 0 (length return_data).
+End ReturnData.
+
+Module Log.
+  Record t : Set := {
+    topics : list U256.t;
+    payload_memory : Memory.t;
+    payload_offset : U256.t;
+    payload_size : U256.t;
+  }.
+
+  Definition of_memory
+      (topics : list U256.t)
+      (memory : Memory.t)
+      (offset size : U256.t) : t := {|
+    topics := topics;
+    payload_memory := memory;
+    payload_offset := offset;
+    payload_size := size;
+  |}.
+
+  Definition of_bytes (topics : list U256.t) (payload : list Z) : t :=
+    of_memory topics (Memory.update_bytes Memory.empty 0 payload) 0 (Z.of_nat (List.length payload)).
+
+  Definition materialize (log : t) : list U256.t * list Z :=
+    (
+      log.(topics),
+      Memory.get_bytes log.(payload_memory) log.(payload_offset) log.(payload_size)
+    ).
+End Log.
+
 Module Storage.
   (** Each slot in the storage is a word. This is different from [Memory.t] where it is only
       bytes. *)
@@ -340,6 +459,19 @@ Fixpoint u256_in (value : U256.t) (values : list U256.t) : bool :=
     else
       u256_in value values
   end.
+
+Definition u256_remove (value : U256.t) (values : list U256.t) : list U256.t :=
+  List.filter (fun current => negb (current =? value)) values.
+
+Definition storage_keys_after_update
+    (slot value : U256.t)
+    (keys : list U256.t) : list U256.t :=
+  if value =? 0 then
+    u256_remove slot keys
+  else if u256_in slot keys then
+    keys
+  else
+    slot :: keys.
 
 Fixpoint bytes_after_dot (bytes : list Z) : option (list Z) :=
   match bytes with
@@ -404,6 +536,7 @@ Module Account.
         here. *)
     codedata : list Z;
     storage : Storage.t;
+    storage_keys : list U256.t;
     immutables : Dict.t U256.t U256.t;
   }.
 End Account.
@@ -413,16 +546,23 @@ Module State.
   Record t : Set := {
     stack : Stack.t;
     memory : Memory.t;
-    return_data : list Z;
+    return_data : ReturnData.t;
     transient_storage : Storage.t;
     gas : U256.t;
+    gas_refund : Z;
+    call_depth : nat;
+    precompile_cache : list (U256.t * list Z * bool * list Z);
+    ecrecover_cache : list (U256.t * U256.t * U256.t * bool * Z * Z * Z * Z * Z);
+    warm_addresses : list U256.t;
+    warm_storage_keys : list (U256.t * U256.t);
+    original_accounts : list (U256.t * Account.t);
     is_static : bool;
     block_number : U256.t;
     block_timestamp : U256.t;
     created_accounts : list U256.t;
     selfdestructed_created_accounts : list U256.t;
     accounts : list (U256.t * Account.t);
-    logs : list (list U256.t * list Z);
+    logs : list Log.t;
     (** This is only for debugging *)
     call_stack : CallStack.t;
   }.
@@ -431,9 +571,16 @@ Module State.
     {|
       State.stack := [];
       State.memory := Memory.empty;
-      State.return_data := [];
+      State.return_data := ReturnData.empty;
       State.transient_storage := Memory.empty;
       State.gas := 1000000000;
+      State.gas_refund := 0;
+      State.call_depth := 0%nat;
+      State.precompile_cache := [];
+      State.ecrecover_cache := [];
+      State.warm_addresses := [];
+      State.warm_storage_keys := [];
+      State.original_accounts := [];
       State.is_static := false;
       State.block_number := 0;
       State.block_timestamp := 0;
@@ -444,6 +591,11 @@ Module State.
       State.call_stack := [];
     |}.
 End State.
+
+Definition max_call_depth : nat := 1024%nat.
+
+Definition call_depth_exceeded (state : State.t) : bool :=
+  Nat.leb max_call_depth state.(State.call_depth).
 
 (** Compute a selector from the signature of an entrypoint *)
 Definition get_selector (entrypoint_name : string) : U256.t :=
@@ -467,6 +619,37 @@ Module StdlibAux.
     let hash : list Z := List.map (fun byte => Z.of_N (Nibble.N_of_byte byte)) hash in
     Memory.bytes_as_u256 hash.
 
+  Fixpoint drop_leading_zeroes (bytes : list Z) : list Z :=
+    match bytes with
+    | [] => []
+    | 0 :: bytes => drop_leading_zeroes bytes
+    | _ => bytes
+    end.
+
+  Definition rlp_integer (value : U256.t) : list Z :=
+    let bytes := drop_leading_zeroes (Memory.u256_as_bytes value) in
+    match bytes with
+    | [] => [128]
+    | [byte] =>
+      if byte <? 128 then
+        [byte]
+      else
+        [129; byte]
+    | _ => [128 + Z.of_nat (List.length bytes)] ++ bytes
+    end.
+
+  Definition low_160_bits_as_bytes (value : U256.t) : list Z :=
+    List.skipn 12 (Memory.u256_as_bytes value).
+
+  Definition address_of_word (value : U256.t) : U256.t :=
+    Z.land ((2 ^ 160) - 1) value.
+
+  Definition contract_creation_address (creator nonce : U256.t) : U256.t :=
+    let payload :=
+      [148] ++ low_160_bits_as_bytes creator ++ rlp_integer nonce in
+    let encoded := [192 + Z.of_nat (List.length payload)] ++ payload in
+    address_of_word (keccak256 encoded).
+
   Definition crypto_bytes_as_z (bytes : list Nibble.byte) : list Z :=
     List.map (fun byte => Z.of_N (Nibble.N_of_byte byte)) bytes.
 
@@ -478,9 +661,20 @@ Module StdlibAux.
     | _, _ => false
     end.
 
+  Definition bytes_slice_with_zero_padding
+      (bytes : list Z) (offset size : U256.t) : list Z :=
+    if size <=? 0 then
+      []
+    else if offset >=? Z.of_nat (List.length bytes) then
+      List.firstn_or_default (Z.to_nat size) 0 []
+    else
+      List.firstn_or_default
+        (Z.to_nat size)
+        0
+        (List.skipn (Z.to_nat offset) bytes).
+
   Definition get_calldata_u256 (calldata : list Z) (index : U256.t) : U256.t :=
-    let index := Z.to_nat index in
-    let bytes := List.firstn_or_default 32 0 (List.skipn index calldata) in
+    let bytes := bytes_slice_with_zero_padding calldata index 32 in
     Memory.bytes_as_u256 bytes.
 
   Lemma get_calldata_u256_is_valid (calldata : list Z) (index : U256.t)
@@ -553,6 +747,291 @@ Module Stdlib.
 
     Definition exp (x y : U256.t) : U256.t :=
       exp_mod_aux 256%nat (x mod (2 ^ 256)) y 1.
+
+    Fixpoint pow_mod_aux (fuel : nat) (modulus base exponent acc : Z) : Z :=
+      match fuel with
+      | O => acc
+      | S fuel' =>
+        if exponent =? 0 then
+          acc
+        else
+          let acc :=
+            if Z.odd exponent then
+              (acc * base) mod modulus
+            else
+              acc in
+          pow_mod_aux fuel' modulus
+            ((base * base) mod modulus)
+            (Z.shiftr exponent 1)
+            acc
+      end.
+
+    Definition pow_mod (base exponent modulus : Z) : Z :=
+      if modulus =? 0 then
+        0
+      else
+        pow_mod_aux
+          (if exponent <=? 0 then 0%nat else Z.to_nat (Z.log2 exponent + 1))
+          modulus
+          (base mod modulus)
+          exponent
+          (1 mod modulus).
+
+    Fixpoint bytes_as_z_mod_aux (modulus acc : Z) (bytes : list Z) : Z :=
+      match bytes with
+      | [] => acc
+      | byte :: bytes =>
+        bytes_as_z_mod_aux modulus ((acc * 256 + byte) mod modulus) bytes
+      end.
+
+    Definition bytes_as_z_mod (modulus : Z) (bytes : list Z) : Z :=
+      if modulus =? 0 then
+        0
+      else
+        bytes_as_z_mod_aux modulus 0 bytes.
+
+    Fixpoint pow_mod_table_aux
+        (fuel : nat) (modulus base current : Z) : list Z :=
+      match fuel with
+      | O => []
+      | S fuel' =>
+        current :: pow_mod_table_aux fuel' modulus base ((current * base) mod modulus)
+      end.
+
+    Definition pow_mod_table (modulus base : Z) : list Z :=
+      pow_mod_table_aux 16%nat modulus base (1 mod modulus).
+
+    Fixpoint pow_mod_square_aux (fuel : nat) (modulus acc : Z) : Z :=
+      match fuel with
+      | O => acc
+      | S fuel' =>
+        pow_mod_square_aux fuel' modulus ((acc * acc) mod modulus)
+      end.
+
+    Definition pow_mod_nibble
+        (table : list Z) (modulus acc : Z) (started : bool) (nibble : Z)
+        : Z * bool :=
+      if started then
+        let acc := pow_mod_square_aux 4%nat modulus acc in
+        if nibble =? 0 then
+          (acc, true)
+        else
+          ((acc * List.nth_default 0 table (Z.to_nat nibble)) mod modulus, true)
+      else if nibble =? 0 then
+        (acc, false)
+      else
+        (List.nth_default 0 table (Z.to_nat nibble), true).
+
+    Definition pow_mod_byte
+        (table : list Z) (modulus acc : Z) (started : bool) (byte : Z)
+        : Z * bool :=
+      let byte := byte mod 256 in
+      let high_nibble := Z.shiftr byte 4 in
+      let low_nibble := byte mod 16 in
+      let '(acc, started) :=
+        pow_mod_nibble table modulus acc started high_nibble in
+      pow_mod_nibble table modulus acc started low_nibble.
+
+    Fixpoint pow_mod_bytes_aux
+        (table : list Z) (modulus acc : Z) (started : bool) (exponent : list Z) : Z :=
+      match exponent with
+      | [] => acc
+      | byte :: exponent =>
+        let '(acc, started) :=
+          pow_mod_byte table modulus acc started byte in
+        pow_mod_bytes_aux table modulus acc started exponent
+      end.
+
+    Definition pow_mod_bytes (base exponent : list Z) (modulus : Z) : Z :=
+      if modulus =? 0 then
+        0
+      else
+        let base := bytes_as_z_mod modulus base in
+        let table := pow_mod_table modulus base in
+        pow_mod_bytes_aux table modulus (1 mod modulus) false exponent.
+
+    Definition bigN_of_byte (byte : Z) : BigN.t :=
+      BigN.of_N (Z.to_N (byte mod 256)).
+
+    Definition bigN_256 : BigN.t :=
+      BigN.of_N 256%N.
+
+    Fixpoint bytes_as_bigN_aux (acc : BigN.t) (bytes : list Z) : BigN.t :=
+      match bytes with
+      | [] => acc
+      | byte :: bytes =>
+        bytes_as_bigN_aux
+          (BigN.add (BigN.mul acc bigN_256) (bigN_of_byte byte))
+          bytes
+      end.
+
+    Definition bytes_as_bigN (bytes : list Z) : BigN.t :=
+      bytes_as_bigN_aux BigN.zero bytes.
+
+    Fixpoint bytes_as_bigN_mod_aux
+        (modulus acc : BigN.t) (bytes : list Z) : BigN.t :=
+      match bytes with
+      | [] => acc
+      | byte :: bytes =>
+        bytes_as_bigN_mod_aux modulus
+          (BigN.modulo
+            (BigN.add (BigN.mul acc bigN_256) (bigN_of_byte byte))
+            modulus)
+          bytes
+      end.
+
+    Definition bytes_as_bigN_mod (modulus : BigN.t) (bytes : list Z) : BigN.t :=
+      if BigN.eqb modulus BigN.zero then
+        BigN.zero
+      else
+        bytes_as_bigN_mod_aux modulus BigN.zero bytes.
+
+    Fixpoint pow_mod_bigN_table_aux
+        (fuel : nat) (modulus base current : BigN.t) : list BigN.t :=
+      match fuel with
+      | O => []
+      | S fuel' =>
+        current ::
+        pow_mod_bigN_table_aux fuel' modulus base
+          (BigN.modulo (BigN.mul current base) modulus)
+      end.
+
+    Definition pow_mod_bigN_table (modulus base : BigN.t) : list BigN.t :=
+      pow_mod_bigN_table_aux 16%nat modulus base (BigN.modulo BigN.one modulus).
+
+    Fixpoint pow_mod_bigN_square_aux
+        (fuel : nat) (modulus acc : BigN.t) : BigN.t :=
+      match fuel with
+      | O => acc
+      | S fuel' =>
+        pow_mod_bigN_square_aux fuel' modulus
+          (BigN.modulo (BigN.square acc) modulus)
+      end.
+
+    Definition pow_mod_bigN_nibble
+        (table : list BigN.t) (modulus acc : BigN.t)
+        (started : bool) (nibble : Z) : BigN.t * bool :=
+      if started then
+        let acc := pow_mod_bigN_square_aux 4%nat modulus acc in
+        if nibble =? 0 then
+          (acc, true)
+        else
+          (BigN.modulo
+            (BigN.mul acc (List.nth_default BigN.zero table (Z.to_nat nibble)))
+            modulus, true)
+      else if nibble =? 0 then
+        (acc, false)
+      else
+        (List.nth_default BigN.zero table (Z.to_nat nibble), true).
+
+    Definition pow_mod_bigN_byte
+        (table : list BigN.t) (modulus acc : BigN.t)
+        (started : bool) (byte : Z) : BigN.t * bool :=
+      let byte := byte mod 256 in
+      let high_nibble := Z.shiftr byte 4 in
+      let low_nibble := byte mod 16 in
+      let '(acc, started) :=
+        pow_mod_bigN_nibble table modulus acc started high_nibble in
+      pow_mod_bigN_nibble table modulus acc started low_nibble.
+
+    Fixpoint pow_mod_bigN_bytes_aux
+        (table : list BigN.t) (modulus acc : BigN.t)
+        (started : bool) (exponent : list Z) : BigN.t :=
+      match exponent with
+      | [] => acc
+      | byte :: exponent =>
+        let '(acc, started) :=
+          pow_mod_bigN_byte table modulus acc started byte in
+        pow_mod_bigN_bytes_aux table modulus acc started exponent
+      end.
+
+    Definition pow_mod_bigN_bytes
+        (base exponent : list Z) (modulus : BigN.t) : BigN.t :=
+      if BigN.eqb modulus BigN.zero then
+        BigN.zero
+      else
+        let base := bytes_as_bigN_mod modulus base in
+        let table := pow_mod_bigN_table modulus base in
+        pow_mod_bigN_bytes_aux table modulus (BigN.modulo BigN.one modulus) false exponent.
+
+    Definition pow_mod_bytes_bigN (base exponent : list Z) (modulus : Z) : Z :=
+      if modulus =? 0 then
+        0
+      else
+        BigN.to_Z
+          (pow_mod_bigN_bytes base exponent (BigN.of_N (Z.to_N modulus))).
+
+    Definition bytes_as_uint64_le (bytes : list Z) : UInt64.t :=
+      UInt64.uint64_of_Z_mod
+        (Memory.bytes_as_u256 (List.rev (List.firstn_or_default 8 0 bytes))).
+
+    Definition bytes_as_uint64_be (bytes : list Z) : UInt64.t :=
+      UInt64.uint64_of_Z_mod
+        (Memory.bytes_as_u256 bytes).
+
+    Definition uint64_le_bytes_as_z (value : UInt64.t) : list Z :=
+      let '(b0, b1, b2, b3, b4, b5, b6, b7) :=
+        UInt64.uint64_to_le_bytes value in
+      StdlibAux.crypto_bytes_as_z [b0; b1; b2; b3; b4; b5; b6; b7].
+
+    Definition blake2f_uint64_at (input : list Z) (offset : U256.t) : UInt64.t :=
+      bytes_as_uint64_le (StdlibAux.bytes_slice_with_zero_padding input offset 8).
+
+    Definition blake2f_h (input : list Z) : Vec8.t UInt64.t :=
+      Vec8.Vec8
+        (blake2f_uint64_at input 4)
+        (blake2f_uint64_at input 12)
+        (blake2f_uint64_at input 20)
+        (blake2f_uint64_at input 28)
+        (blake2f_uint64_at input 36)
+        (blake2f_uint64_at input 44)
+        (blake2f_uint64_at input 52)
+        (blake2f_uint64_at input 60).
+
+    Definition blake2f_m (input : list Z) : Vec16.t UInt64.t :=
+      Vec16.Vec16
+        (blake2f_uint64_at input 68)
+        (blake2f_uint64_at input 76)
+        (blake2f_uint64_at input 84)
+        (blake2f_uint64_at input 92)
+        (blake2f_uint64_at input 100)
+        (blake2f_uint64_at input 108)
+        (blake2f_uint64_at input 116)
+        (blake2f_uint64_at input 124)
+        (blake2f_uint64_at input 132)
+        (blake2f_uint64_at input 140)
+        (blake2f_uint64_at input 148)
+        (blake2f_uint64_at input 156)
+        (blake2f_uint64_at input 164)
+        (blake2f_uint64_at input 172)
+        (blake2f_uint64_at input 180)
+        (blake2f_uint64_at input 188).
+
+    Definition blake2f_rounds (input : list Z) : UInt64.t :=
+      bytes_as_uint64_be
+        (StdlibAux.bytes_slice_with_zero_padding input 0 4).
+
+    Definition blake2f_output_with_final
+        (input : list Z) (final : bool) : list Z :=
+      let output :=
+        RocqEvm.Crypto.BLAKE2b.F
+          (blake2f_h input)
+          (blake2f_m input)
+          (blake2f_uint64_at input 196)
+          (blake2f_uint64_at input 204)
+          final
+          (blake2f_rounds input) in
+      List.concat (List.map uint64_le_bytes_as_z (Vec8.to_list output)).
+
+    Definition blake2f_output (input : list Z) : option (list Z) :=
+      if Z.of_nat (List.length input) =? 213 then
+        match List.nth_error input 212 with
+        | Some 0 => Some (blake2f_output_with_final input false)
+        | Some 1 => Some (blake2f_output_with_final input true)
+        | _ => None
+        end
+      else
+        None.
 
     Definition not (x : U256.t) : U256.t :=
       2^256 - x - 1.
@@ -898,7 +1377,7 @@ Module Stdlib.
 
   Definition extcodecopy (a t f s : U256.t) : M.t unit :=
     let* code_bytes := LowM.Primitive (Primitive.GetCodeBytes a) M.pure in
-    let bytes := List.firstn_or_default (Z.to_nat s) 0 (List.skipn (Z.to_nat f) code_bytes) in
+    let bytes := StdlibAux.bytes_slice_with_zero_padding code_bytes f s in
     LowM.Primitive (Primitive.MStore t bytes) M.pure.
 
   Definition returndatasize : M.t U256.t :=
@@ -933,80 +1412,775 @@ Module Stdlib.
   Definition pad_left (n : nat) (bytes : list Z) : list Z :=
     List.repeat 0 n ++ bytes.
 
-  Definition precompile_output (address : U256.t) (input : list Z) : option (list Z) :=
+  Fixpoint pow_mod_aux
+      (fuel : nat)
+      (base exponent modulus acc : Z) : Z :=
+    match fuel with
+    | O => acc mod modulus
+    | S fuel' =>
+      if exponent =? 0 then
+        acc mod modulus
+      else
+        let acc :=
+          if Z.odd exponent then
+            (acc * base) mod modulus
+          else
+            acc in
+        let base := (base * base) mod modulus in
+        pow_mod_aux fuel' base (Z.shiftr exponent 1) modulus acc
+    end.
+
+  Definition pow_mod (base exponent modulus : Z) : Z :=
+    if modulus <=? 0 then
+      0
+    else
+      pow_mod_aux 512%nat (base mod modulus) exponent modulus 1.
+
+  Definition inv_mod (modulus x : Z) : option Z :=
+    let '(u, _v, d) := extgcd (x mod modulus) modulus in
+    if d =? 1 then Some (u mod modulus) else None.
+
+  Definition secp256k1_field_modulus : Z :=
+    115792089237316195423570985008687907853269984665640564039457584007908834671663.
+
+  Definition secp256k1_group_order : Z :=
+    115792089237316195423570985008687907852837564279074904382605163141518161494337.
+
+  Definition secp256k1_gx : Z :=
+    55066263022277343669578718895168534326250603453777594175500187360389116729240.
+
+  Definition secp256k1_gy : Z :=
+    32670510020758816978083085130507043184471273380659243275938904335757337482424.
+
+  Definition secp256k1_point : Set := Z * Z.
+
+  Definition secp256k1_infinity (point : secp256k1_point) : bool :=
+    let '(x, y) := point in
+    (x =? 0) && (y =? 0).
+
+  Definition secp256k1_field (x : Z) : bool :=
+    (0 <=? x) && (x <? secp256k1_field_modulus).
+
+  Definition secp256k1_scalar (x : Z) : bool :=
+    (0 <? x) && (x <? secp256k1_group_order).
+
+  Definition secp256k1_mod (x : Z) : Z :=
+    x mod secp256k1_field_modulus.
+
+  Definition secp256k1_on_curve (point : secp256k1_point) : bool :=
+    let '(x, y) := point in
+    if secp256k1_infinity point then
+      true
+    else
+      secp256k1_field x && secp256k1_field y &&
+      ((y * y - (x * x * x + 7)) mod secp256k1_field_modulus =? 0).
+
+  Definition secp256k1_neg (point : secp256k1_point) : secp256k1_point :=
+    let '(x, y) := point in
+    if secp256k1_infinity point then
+      point
+    else
+      (x, secp256k1_mod (- y)).
+
+  Definition secp256k1_add_valid
+      (point1 point2 : secp256k1_point) : option secp256k1_point :=
+    let '(x1, y1) := point1 in
+    let '(x2, y2) := point2 in
+    if secp256k1_infinity point1 then
+      Some point2
+    else if secp256k1_infinity point2 then
+      Some point1
+    else if x1 =? x2 then
+      if ((y1 + y2) mod secp256k1_field_modulus =? 0) then
+        Some (0, 0)
+      else
+        match inv_mod secp256k1_field_modulus (2 * y1) with
+        | None => None
+        | Some denominator_inv =>
+          let slope := secp256k1_mod (3 * x1 * x1 * denominator_inv) in
+          let x3 := secp256k1_mod (slope * slope - x1 - x2) in
+          let y3 := secp256k1_mod (slope * (x1 - x3) - y1) in
+          Some (x3, y3)
+        end
+    else
+      match inv_mod secp256k1_field_modulus (x2 - x1) with
+      | None => None
+      | Some denominator_inv =>
+        let slope := secp256k1_mod ((y2 - y1) * denominator_inv) in
+        let x3 := secp256k1_mod (slope * slope - x1 - x2) in
+        let y3 := secp256k1_mod (slope * (x1 - x3) - y1) in
+        Some (x3, y3)
+      end.
+
+  Definition secp256k1_add
+      (point1 point2 : secp256k1_point) : option secp256k1_point :=
+    if secp256k1_on_curve point1 && secp256k1_on_curve point2 then
+      secp256k1_add_valid point1 point2
+    else
+      None.
+
+  Definition secp256k1_jacobian_point : Set := Z * Z * Z.
+
+  Definition secp256k1_jacobian_infinity
+      (point : secp256k1_jacobian_point) : bool :=
+    let '(_x, _y, z) := point in
+    z =? 0.
+
+  Definition secp256k1_jacobian_infinity_point : secp256k1_jacobian_point :=
+    (0, 1, 0).
+
+  Definition secp256k1_affine_to_jacobian
+      (point : secp256k1_point) : secp256k1_jacobian_point :=
+    let '(x, y) := point in
+    if secp256k1_infinity point then
+      secp256k1_jacobian_infinity_point
+    else
+      (x, y, 1).
+
+  Definition secp256k1_jacobian_double
+      (point : secp256k1_jacobian_point) : secp256k1_jacobian_point :=
+    let '(x, y, z) := point in
+    if secp256k1_jacobian_infinity point || (y =? 0) then
+      secp256k1_jacobian_infinity_point
+    else
+      let yy := secp256k1_mod (y * y) in
+      let yyyy := secp256k1_mod (yy * yy) in
+      let s := secp256k1_mod (4 * x * yy) in
+      let m := secp256k1_mod (3 * x * x) in
+      let x3 := secp256k1_mod (m * m - 2 * s) in
+      let y3 := secp256k1_mod (m * (s - x3) - 8 * yyyy) in
+      let z3 := secp256k1_mod (2 * y * z) in
+      (x3, y3, z3).
+
+  Definition secp256k1_jacobian_add
+      (point1 point2 : secp256k1_jacobian_point) : secp256k1_jacobian_point :=
+    if secp256k1_jacobian_infinity point1 then
+      point2
+    else if secp256k1_jacobian_infinity point2 then
+      point1
+    else
+      let '(x1, y1, z1) := point1 in
+      let '(x2, y2, z2) := point2 in
+      let z1z1 := secp256k1_mod (z1 * z1) in
+      let z2z2 := secp256k1_mod (z2 * z2) in
+      let u1 := secp256k1_mod (x1 * z2z2) in
+      let u2 := secp256k1_mod (x2 * z1z1) in
+      let s1 := secp256k1_mod (y1 * z2 * z2z2) in
+      let s2 := secp256k1_mod (y2 * z1 * z1z1) in
+      if u1 =? u2 then
+        if s1 =? s2 then
+          secp256k1_jacobian_double point1
+        else
+          secp256k1_jacobian_infinity_point
+      else
+        let h := secp256k1_mod (u2 - u1) in
+        let i := secp256k1_mod ((2 * h) * (2 * h)) in
+        let j := secp256k1_mod (h * i) in
+        let r := secp256k1_mod (2 * (s2 - s1)) in
+        let v := secp256k1_mod (u1 * i) in
+        let x3 := secp256k1_mod (r * r - j - 2 * v) in
+        let y3 := secp256k1_mod (r * (v - x3) - 2 * s1 * j) in
+        let z3 :=
+          secp256k1_mod (((z1 + z2) * (z1 + z2) - z1z1 - z2z2) * h) in
+        (x3, y3, z3).
+
+  Definition secp256k1_jacobian_add_affine
+      (point1 : secp256k1_jacobian_point)
+      (point2 : secp256k1_point) : secp256k1_jacobian_point :=
+    if secp256k1_jacobian_infinity point1 then
+      secp256k1_affine_to_jacobian point2
+    else if secp256k1_infinity point2 then
+      point1
+    else
+      let '(x1, y1, z1) := point1 in
+      let '(x2, y2) := point2 in
+      let z1z1 := secp256k1_mod (z1 * z1) in
+      let u1 := x1 in
+      let u2 := secp256k1_mod (x2 * z1z1) in
+      let s1 := y1 in
+      let s2 := secp256k1_mod (y2 * z1 * z1z1) in
+      if u1 =? u2 then
+        if s1 =? s2 then
+          secp256k1_jacobian_double point1
+        else
+          secp256k1_jacobian_infinity_point
+      else
+        let h := secp256k1_mod (u2 - u1) in
+        let i := secp256k1_mod ((2 * h) * (2 * h)) in
+        let j := secp256k1_mod (h * i) in
+        let r := secp256k1_mod (2 * (s2 - s1)) in
+        let v := secp256k1_mod (u1 * i) in
+        let x3 := secp256k1_mod (r * r - j - 2 * v) in
+        let y3 := secp256k1_mod (r * (v - x3) - 2 * s1 * j) in
+        let z3 := secp256k1_mod (2 * z1 * h) in
+        (x3, y3, z3).
+
+  Definition secp256k1_jacobian_to_affine
+      (point : secp256k1_jacobian_point) : option secp256k1_point :=
+    let '(x, y, z) := point in
+    if secp256k1_jacobian_infinity point then
+      Some (0, 0)
+    else
+      match inv_mod secp256k1_field_modulus z with
+      | None => None
+      | Some z_inv =>
+        let z_inv2 := secp256k1_mod (z_inv * z_inv) in
+        let z_inv3 := secp256k1_mod (z_inv2 * z_inv) in
+        Some (secp256k1_mod (x * z_inv2), secp256k1_mod (y * z_inv3))
+      end.
+
+  Fixpoint secp256k1_jacobian_multiples_aux
+      (fuel : nat)
+      (point current : secp256k1_jacobian_point)
+      : list secp256k1_jacobian_point :=
+    match fuel with
+    | O => []
+    | S fuel' =>
+      current :: secp256k1_jacobian_multiples_aux fuel'
+        point (secp256k1_jacobian_add current point)
+    end.
+
+  Definition secp256k1_jacobian_multiples
+      (point : secp256k1_point) : list secp256k1_jacobian_point :=
+    secp256k1_jacobian_multiples_aux 16%nat
+      (secp256k1_affine_to_jacobian point)
+      secp256k1_jacobian_infinity_point.
+
+  Fixpoint secp256k1_jacobian_double_many
+      (fuel : nat)
+      (point : secp256k1_jacobian_point) : secp256k1_jacobian_point :=
+    match fuel with
+    | O => point
+    | S fuel' =>
+      secp256k1_jacobian_double_many fuel'
+        (secp256k1_jacobian_double point)
+    end.
+
+  Fixpoint secp256k1_mul_window_aux
+      (fuel : nat)
+      (scalar : Z)
+      (table : list secp256k1_jacobian_point)
+      (acc : secp256k1_jacobian_point) : secp256k1_jacobian_point :=
+    match fuel with
+    | O => acc
+    | S fuel' =>
+      let acc := secp256k1_jacobian_double_many 4%nat acc in
+      let window := Z.shiftr scalar (4 * Z.of_nat fuel') mod 16 in
+      let addend :=
+        List.nth (Z.to_nat window) table secp256k1_jacobian_infinity_point in
+      let acc :=
+        if window =? 0 then
+          acc
+        else
+          secp256k1_jacobian_add acc addend in
+      secp256k1_mul_window_aux fuel' scalar table acc
+    end.
+
+  Definition secp256k1_mul
+      (point : secp256k1_point) (scalar : Z) : option secp256k1_point :=
+    if secp256k1_on_curve point then
+      secp256k1_jacobian_to_affine
+        (let scalar := scalar mod secp256k1_group_order in
+          let table := secp256k1_jacobian_multiples point in
+          secp256k1_mul_window_aux 64%nat scalar table
+            secp256k1_jacobian_infinity_point)
+    else
+      None.
+
+  Fixpoint secp256k1_mul_add_jacobian_aux
+      (fuel : nat)
+      (scalar1 scalar2 : Z)
+      (point1 point2 both : secp256k1_point)
+      (acc : secp256k1_jacobian_point)
+      : secp256k1_jacobian_point :=
+    match fuel with
+    | O => acc
+    | S fuel' =>
+      let bit_index := Z.of_nat fuel' in
+      let acc := secp256k1_jacobian_double acc in
+      let bit1 := Z.testbit scalar1 bit_index in
+      let bit2 := Z.testbit scalar2 bit_index in
+      let acc :=
+        if bit1 then
+          if bit2 then
+            secp256k1_jacobian_add_affine acc both
+          else
+            secp256k1_jacobian_add_affine acc point1
+        else if bit2 then
+          secp256k1_jacobian_add_affine acc point2
+        else
+          acc in
+      secp256k1_mul_add_jacobian_aux fuel'
+        scalar1 scalar2 point1 point2 both acc
+    end.
+
+  Definition secp256k1_mul_add
+      (point1 : secp256k1_point) (scalar1 : Z)
+      (point2 : secp256k1_point) (scalar2 : Z)
+      : option secp256k1_point :=
+    if secp256k1_on_curve point1 && secp256k1_on_curve point2 then
+      match secp256k1_add_valid point1 point2 with
+      | None => None
+      | Some both =>
+        secp256k1_jacobian_to_affine
+          (secp256k1_mul_add_jacobian_aux 256%nat
+            (scalar1 mod secp256k1_group_order)
+            (scalar2 mod secp256k1_group_order)
+            point1 point2 both
+            secp256k1_jacobian_infinity_point)
+      end
+    else
+      None.
+
+  Definition secp256k1_recover_public_key
+      (message_hash v r s : Z) : option secp256k1_point :=
+    if ((v =? 27) || (v =? 28)) &&
+        secp256k1_scalar r && secp256k1_scalar s then
+      let recovery_id := v - 27 in
+      let x := r in
+      if x <? secp256k1_field_modulus then
+        let alpha := secp256k1_mod (x * x * x + 7) in
+        let beta :=
+          pow_mod alpha ((secp256k1_field_modulus + 1) / 4)
+            secp256k1_field_modulus in
+        let y :=
+          if (beta mod 2 =? recovery_id) then
+            beta
+          else
+            secp256k1_field_modulus - beta in
+        let r_point := (x, y) in
+        if secp256k1_on_curve r_point then
+          match inv_mod secp256k1_group_order r with
+          | None => None
+          | Some r_inv =>
+            let message_hash := message_hash mod secp256k1_group_order in
+            let scalar1 := (s * r_inv) mod secp256k1_group_order in
+            let scalar2 := (- message_hash * r_inv) mod secp256k1_group_order in
+            match
+              secp256k1_mul_add
+                r_point scalar1
+                (secp256k1_gx, secp256k1_gy) scalar2
+            with
+            | Some public_key =>
+              if secp256k1_infinity public_key then None else Some public_key
+            | None => None
+            end
+          end
+        else
+          None
+      else
+        None
+    else
+      None.
+
+  Definition ecrecover_word (input : list Z) (offset : U256.t) : U256.t :=
+    Memory.bytes_as_u256
+      (StdlibAux.bytes_slice_with_zero_padding input offset 32).
+
+  Definition ecrecover_output_of_public_key
+      (public_key : secp256k1_point) : list Z :=
+    let '(x, y) := public_key in
+    let public_key := Memory.u256_as_bytes x ++ Memory.u256_as_bytes y in
+    let hash :=
+      StdlibAux.crypto_bytes_as_z
+        (RocqEvm.Crypto.Keccak.keccak_256 (Memory.bytes_as_bytes public_key)) in
+    pad_left 12 (List.skipn 12 hash).
+
+  Definition ecrecover_result (input : list Z) : list Z :=
+    let message_hash := ecrecover_word input 0 in
+    let v := ecrecover_word input 32 in
+    let r := ecrecover_word input 64 in
+    let s := ecrecover_word input 96 in
+    match secp256k1_recover_public_key message_hash v r s with
+    | None => []
+    | Some public_key => ecrecover_output_of_public_key public_key
+    end.
+
+  Definition modexp_word (input : list Z) (offset : U256.t) : U256.t :=
+    Memory.bytes_as_u256 (StdlibAux.bytes_slice_with_zero_padding input offset 32).
+
+  Definition modexp_base_length (input : list Z) : U256.t :=
+    modexp_word input 0.
+
+  Definition modexp_exponent_length (input : list Z) : U256.t :=
+    modexp_word input 32.
+
+  Definition modexp_modulus_length (input : list Z) : U256.t :=
+    modexp_word input 64.
+
+  Definition modexp_base_offset : U256.t := 96.
+
+  Definition modexp_exponent_offset (input : list Z) : U256.t :=
+    modexp_base_offset + modexp_base_length input.
+
+  Definition modexp_modulus_offset (input : list Z) : U256.t :=
+    modexp_exponent_offset input + modexp_exponent_length input.
+
+  Definition modexp_base_bytes (input : list Z) : list Z :=
+    StdlibAux.bytes_slice_with_zero_padding
+      input modexp_base_offset (modexp_base_length input).
+
+  Definition modexp_base (input : list Z) : Z :=
+    Memory.bytes_as_u256 (modexp_base_bytes input).
+
+  Definition modexp_exponent_bytes (input : list Z) : list Z :=
+    StdlibAux.bytes_slice_with_zero_padding
+      input (modexp_exponent_offset input) (modexp_exponent_length input).
+
+  Definition modexp_exponent (input : list Z) : Z :=
+    Memory.bytes_as_u256 (modexp_exponent_bytes input).
+
+  Definition modexp_exponent_head (input : list Z) : Z :=
+    Memory.bytes_as_u256
+      (StdlibAux.bytes_slice_with_zero_padding
+        input (modexp_exponent_offset input)
+        (Z.min 32 (modexp_exponent_length input))).
+
+  Definition modexp_modulus_bytes (input : list Z) : list Z :=
+    StdlibAux.bytes_slice_with_zero_padding
+      input (modexp_modulus_offset input) (modexp_modulus_length input).
+
+  Definition modexp_modulus (input : list Z) : Z :=
+    Memory.bytes_as_u256 (modexp_modulus_bytes input).
+
+  Definition modexp_modulus_bigN (input : list Z) : BigN.t :=
+    Pure.bytes_as_bigN (modexp_modulus_bytes input).
+
+  Definition modexp_output (input : list Z) : list Z :=
+    let modulus_length := modexp_modulus_length input in
+    if modulus_length <=? 0 then
+      []
+    else
+      let modulus := modexp_modulus_bigN input in
+      if BigN.eqb modulus BigN.zero then
+        List.repeat 0 (Z.to_nat modulus_length)
+      else
+        Memory.z_as_bytes modulus_length
+          (BigN.to_Z (Pure.pow_mod_bigN_bytes
+          (modexp_base_bytes input)
+          (modexp_exponent_bytes input)
+          modulus)).
+
+  Definition bn254_field_modulus : Z :=
+    21888242871839275222246405745257275088696311157297823662689037894645226208583.
+
+  Definition bn254_group_order : Z :=
+    21888242871839275222246405745257275088548364400416034343698204186575808495617.
+
+  Definition bn254_field (x : Z) : bool :=
+    (0 <=? x) && (x <? bn254_field_modulus).
+
+  Definition bn254_mod (x : Z) : Z :=
+    x mod bn254_field_modulus.
+
+  Definition bn254_inv (x : Z) : option Z :=
+    let '(u, _v, d) := extgcd (bn254_mod x) bn254_field_modulus in
+    if d =? 1 then Some (bn254_mod u) else None.
+
+  Definition bn254_word (input : list Z) (offset : U256.t) : U256.t :=
+    Memory.bytes_as_u256
+      (StdlibAux.bytes_slice_with_zero_padding input offset 32).
+
+  Definition bn254_g1_point : Set := Z * Z.
+
+  Definition bn254_g1_input (input : list Z) (offset : U256.t) : bn254_g1_point :=
+    (bn254_word input offset, bn254_word input (offset + 32)).
+
+  Definition bn254_g1_infinity (point : bn254_g1_point) : bool :=
+    let '(x, y) := point in
+    (x =? 0) && (y =? 0).
+
+  Definition bn254_g1_on_curve (point : bn254_g1_point) : bool :=
+    let '(x, y) := point in
+    if bn254_g1_infinity point then
+      true
+    else
+      bn254_field x && bn254_field y &&
+      ((y * y - (x * x * x + 3)) mod bn254_field_modulus =? 0).
+
+  Definition bn254_g1_output (point : bn254_g1_point) : list Z :=
+    let '(x, y) := point in
+    Memory.u256_as_bytes x ++ Memory.u256_as_bytes y.
+
+  Definition bn254_g1_add_valid
+      (point1 point2 : bn254_g1_point) : option bn254_g1_point :=
+    let '(x1, y1) := point1 in
+    let '(x2, y2) := point2 in
+    if bn254_g1_infinity point1 then
+      Some point2
+    else if bn254_g1_infinity point2 then
+      Some point1
+    else if x1 =? x2 then
+      if ((y1 + y2) mod bn254_field_modulus =? 0) then
+        Some (0, 0)
+      else
+        match bn254_inv (2 * y1) with
+        | None => None
+        | Some denominator_inv =>
+          let slope := bn254_mod (3 * x1 * x1 * denominator_inv) in
+          let x3 := bn254_mod (slope * slope - x1 - x2) in
+          let y3 := bn254_mod (slope * (x1 - x3) - y1) in
+          Some (x3, y3)
+        end
+    else
+      match bn254_inv (x2 - x1) with
+      | None => None
+      | Some denominator_inv =>
+        let slope := bn254_mod ((y2 - y1) * denominator_inv) in
+        let x3 := bn254_mod (slope * slope - x1 - x2) in
+        let y3 := bn254_mod (slope * (x1 - x3) - y1) in
+        Some (x3, y3)
+      end.
+
+  Definition bn254_g1_add
+      (point1 point2 : bn254_g1_point) : option bn254_g1_point :=
+    if bn254_g1_on_curve point1 && bn254_g1_on_curve point2 then
+      bn254_g1_add_valid point1 point2
+    else
+      None.
+
+  Definition bn254_g1_jacobian_point : Set := Z * Z * Z.
+
+  Definition bn254_g1_jacobian_infinity
+      (point : bn254_g1_jacobian_point) : bool :=
+    let '(_x, _y, z) := point in
+    z =? 0.
+
+  Definition bn254_g1_jacobian_infinity_point : bn254_g1_jacobian_point :=
+    (0, 1, 0).
+
+  Definition bn254_g1_affine_to_jacobian
+      (point : bn254_g1_point) : bn254_g1_jacobian_point :=
+    let '(x, y) := point in
+    if bn254_g1_infinity point then
+      bn254_g1_jacobian_infinity_point
+    else
+      (x, y, 1).
+
+  Definition bn254_g1_jacobian_double
+      (point : bn254_g1_jacobian_point) : bn254_g1_jacobian_point :=
+    let '(x, y, z) := point in
+    if bn254_g1_jacobian_infinity point || (y =? 0) then
+      bn254_g1_jacobian_infinity_point
+    else
+      let yy := bn254_mod (y * y) in
+      let yyyy := bn254_mod (yy * yy) in
+      let s := bn254_mod (4 * x * yy) in
+      let m := bn254_mod (3 * x * x) in
+      let x3 := bn254_mod (m * m - 2 * s) in
+      let y3 := bn254_mod (m * (s - x3) - 8 * yyyy) in
+      let z3 := bn254_mod (2 * y * z) in
+      (x3, y3, z3).
+
+  Definition bn254_g1_jacobian_add
+      (point1 point2 : bn254_g1_jacobian_point) : bn254_g1_jacobian_point :=
+    if bn254_g1_jacobian_infinity point1 then
+      point2
+    else if bn254_g1_jacobian_infinity point2 then
+      point1
+    else
+      let '(x1, y1, z1) := point1 in
+      let '(x2, y2, z2) := point2 in
+      let z1z1 := bn254_mod (z1 * z1) in
+      let z2z2 := bn254_mod (z2 * z2) in
+      let u1 := bn254_mod (x1 * z2z2) in
+      let u2 := bn254_mod (x2 * z1z1) in
+      let s1 := bn254_mod (y1 * z2 * z2z2) in
+      let s2 := bn254_mod (y2 * z1 * z1z1) in
+      if u1 =? u2 then
+        if s1 =? s2 then
+          bn254_g1_jacobian_double point1
+        else
+          bn254_g1_jacobian_infinity_point
+      else
+        let h := bn254_mod (u2 - u1) in
+        let i := bn254_mod ((2 * h) * (2 * h)) in
+        let j := bn254_mod (h * i) in
+        let r := bn254_mod (2 * (s2 - s1)) in
+        let v := bn254_mod (u1 * i) in
+        let x3 := bn254_mod (r * r - j - 2 * v) in
+        let y3 := bn254_mod (r * (v - x3) - 2 * s1 * j) in
+        let z3 :=
+          bn254_mod (((z1 + z2) * (z1 + z2) - z1z1 - z2z2) * h) in
+        (x3, y3, z3).
+
+  Definition bn254_g1_jacobian_to_affine
+      (point : bn254_g1_jacobian_point) : option bn254_g1_point :=
+    let '(x, y, z) := point in
+    if bn254_g1_jacobian_infinity point then
+      Some (0, 0)
+    else
+      match bn254_inv z with
+      | None => None
+      | Some z_inv =>
+        let z_inv2 := bn254_mod (z_inv * z_inv) in
+        let z_inv3 := bn254_mod (z_inv2 * z_inv) in
+        Some (bn254_mod (x * z_inv2), bn254_mod (y * z_inv3))
+      end.
+
+  Fixpoint bn254_g1_jacobian_multiples_aux
+      (fuel : nat)
+      (point current : bn254_g1_jacobian_point)
+      : list bn254_g1_jacobian_point :=
+    match fuel with
+    | O => []
+    | S fuel' =>
+      current :: bn254_g1_jacobian_multiples_aux fuel'
+        point (bn254_g1_jacobian_add current point)
+    end.
+
+  Definition bn254_g1_jacobian_multiples
+      (point : bn254_g1_point) : list bn254_g1_jacobian_point :=
+    bn254_g1_jacobian_multiples_aux 16%nat
+      (bn254_g1_affine_to_jacobian point)
+      bn254_g1_jacobian_infinity_point.
+
+  Fixpoint bn254_g1_jacobian_double_many
+      (fuel : nat)
+      (point : bn254_g1_jacobian_point) : bn254_g1_jacobian_point :=
+    match fuel with
+    | O => point
+    | S fuel' =>
+      bn254_g1_jacobian_double_many fuel'
+        (bn254_g1_jacobian_double point)
+    end.
+
+  Fixpoint bn254_g1_mul_window_aux
+      (fuel : nat)
+      (scalar : Z)
+      (table : list bn254_g1_jacobian_point)
+      (acc : bn254_g1_jacobian_point) : bn254_g1_jacobian_point :=
+    match fuel with
+    | O => acc
+    | S fuel' =>
+      let acc := bn254_g1_jacobian_double_many 4%nat acc in
+      let window := Z.shiftr scalar (4 * Z.of_nat fuel') mod 16 in
+      let addend :=
+        List.nth (Z.to_nat window) table bn254_g1_jacobian_infinity_point in
+      let acc :=
+        if window =? 0 then
+          acc
+        else
+          bn254_g1_jacobian_add acc addend in
+      bn254_g1_mul_window_aux fuel' scalar table acc
+    end.
+
+  Definition bn254_g1_mul
+      (point : bn254_g1_point) (scalar : Z) : option bn254_g1_point :=
+    if bn254_g1_on_curve point then
+      bn254_g1_jacobian_to_affine
+        (let scalar := scalar mod bn254_group_order in
+          let table := bn254_g1_jacobian_multiples point in
+          bn254_g1_mul_window_aux 64%nat scalar table
+            bn254_g1_jacobian_infinity_point)
+    else
+      None.
+
+  Definition bn254_ecadd_result (input : list Z) : option (list Z) :=
+    match bn254_g1_add (bn254_g1_input input 0) (bn254_g1_input input 64) with
+    | Some point => Some (bn254_g1_output point)
+    | None => None
+    end.
+
+  Definition bn254_ecmul_result (input : list Z) : option (list Z) :=
+    match bn254_g1_mul (bn254_g1_input input 0) (bn254_word input 64) with
+    | Some point => Some (bn254_g1_output point)
+    | None => None
+    end.
+
+  Fixpoint bn254_pairing_fields_in_range_aux
+      (fuel : nat) (input : list Z) (offset : U256.t) : bool :=
+    match fuel with
+    | O => true
+    | S fuel' =>
+      bn254_g1_on_curve (bn254_g1_input input offset) &&
+      bn254_field (bn254_word input (offset + 64)) &&
+      bn254_field (bn254_word input (offset + 96)) &&
+      bn254_field (bn254_word input (offset + 128)) &&
+      bn254_field (bn254_word input (offset + 160)) &&
+      bn254_pairing_fields_in_range_aux fuel' input (offset + 192)
+    end.
+
+  Definition bn254_pairing_input_well_formed (input : list Z) : bool :=
+    let length := Z.of_nat (List.length input) in
+    if length mod 192 =? 0 then
+      bn254_pairing_fields_in_range_aux (Z.to_nat (length / 192)) input 0
+    else
+      false.
+
+  Inductive precompile_result : Set :=
+  | PrecompileSuccess (output : list Z)
+  | PrecompileFailure.
+
+  Definition precompile_known_address (address : U256.t) : bool :=
+    match address with
+    | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
+    | 15 | 16 | 17 | 256 => true
+    | _ => false
+    end.
+
+  Definition precompile_run_result
+      (address : U256.t) (input : list Z) : option precompile_result :=
     match address with
     | 1 =>
-      let expected_input :=
-        Memory.hex_string_as_bytes
-          "18c547e4f7b0f325ad1e56f57e26c745b09a3e503d86e00e5255ff7f715d3d1c000000000000000000000000000000000000000000000000000000000000001c73b1693892219d736caba55bdb67216e485557ea6b6af75f37096c9aa6a5a75feeb940b1d03b21e36b0e47e79769f095fe2ab855bd91e3a38756b7d75a9c4549" in
-      if StdlibAux.bytes_eqb (List.firstn 128 input) expected_input then
-        Some (
-          Memory.hex_string_as_bytes
-            "000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-        )
-      else
-        Some []
+      Some (PrecompileSuccess (ecrecover_result input))
     | 2 =>
-      Some (
+      Some (PrecompileSuccess (
         StdlibAux.crypto_bytes_as_z
           (RocqEvm.Crypto.SHA256.sha256 (Memory.bytes_as_bytes input))
-      )
+      ))
     | 3 =>
-      Some (
+      Some (PrecompileSuccess (
         pad_left 12 (
           StdlibAux.crypto_bytes_as_z
             (RocqEvm.Crypto.RIPEMD160.ripemd160 (Memory.bytes_as_bytes input))
         )
-      )
-    | 4 => Some input
+      ))
+    | 4 => Some (PrecompileSuccess input)
+    | 5 => Some (PrecompileSuccess (modexp_output input))
     | 6 =>
-      let expected_input :=
-        Memory.hex_string_as_bytes
-          "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002" in
-      let zero_sum_input :=
-        Memory.u256_as_bytes 1 ++
-        Memory.u256_as_bytes 2 ++
-        Memory.u256_as_bytes 1 ++
-        Memory.u256_as_bytes 21888242871839275222246405745257275088696311157297823662689037894645226208581 in
-      if StdlibAux.bytes_eqb (List.firstn 128 input) expected_input then
-        Some (
-          Memory.hex_string_as_bytes
-            "030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4"
-        )
-      else if StdlibAux.bytes_eqb (List.firstn 128 input) zero_sum_input then
-        Some (List.repeat 0 64)
-      else
-        Some (List.repeat 0 64)
+      match bn254_ecadd_result input with
+      | Some output => Some (PrecompileSuccess output)
+      | None => Some PrecompileFailure
+      end
     | 7 =>
-      let expected_input :=
-        Memory.hex_string_as_bytes
-          "000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002" in
-      let test_mul_input :=
-        Memory.u256_as_bytes 14125296762497065001182820090155008161146766663259912659363835465243039841726 ++
-        Memory.u256_as_bytes 16229134936871442251132173501211935676986397196799085184804749187146857848057 ++
-        Memory.u256_as_bytes 13986731495506593864492662381614386532349950841221768152838255933892789078521 in
-      if StdlibAux.bytes_eqb (List.firstn 96 input) expected_input then
-        Some (
-          Memory.hex_string_as_bytes
-            "030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4"
-        )
-      else if StdlibAux.bytes_eqb (List.firstn 96 input) test_mul_input then
-        Some (
-          Memory.u256_as_bytes 18256332256630856740336504687838346961237861778318632856900758565550522381207 ++
-          Memory.u256_as_bytes 6976682127058094634733239494758371323697222088503263230319702770853579280803
-        )
-      else
-        Some (List.repeat 0 64)
+      match bn254_ecmul_result input with
+      | Some output => Some (PrecompileSuccess output)
+      | None => Some PrecompileFailure
+      end
     | 8 =>
-      Some (Memory.u256_as_bytes 1)
+      if bn254_pairing_input_well_formed input then
+        Some (PrecompileSuccess (Memory.u256_as_bytes 1))
+      else
+        Some PrecompileFailure
+    | 9 =>
+      match Pure.blake2f_output input with
+      | Some output => Some (PrecompileSuccess output)
+      | None => Some PrecompileFailure
+      end
+    | 10 =>
+      Some PrecompileFailure
+    | 11 | 12 | 13 | 14 | 15 | 16 | 17 =>
+      Some PrecompileFailure
+    | 256 =>
+      Some (PrecompileSuccess [])
+    | _ => None
+    end.
+
+  Definition precompile_output (address : U256.t) (input : list Z) : option (list Z) :=
+    match precompile_run_result address input with
+    | Some (PrecompileSuccess output) => Some output
     | _ => None
     end.
 
   Definition call_precompile (a in_ insize out outsize : U256.t) : M.t U256.t :=
     let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
-    match precompile_output a input with
+    match precompile_run_result a input with
     | None => LowM.Impossible "precompile not found"
-    | Some output =>
+    | Some PrecompileFailure =>
+      let* tt := LowM.Primitive (Primitive.RStore []) M.pure in
+      M.pure 0
+    | Some (PrecompileSuccess output) =>
       let* tt := LowM.Primitive (Primitive.RStore output) M.pure in
       let* tt :=
         LowM.Primitive
@@ -1016,18 +2190,13 @@ Module Stdlib.
     end.
 
   Definition create (v p n : U256.t) : M.t U256.t :=
-    (* TODO: have the exact calculation of the address with RLP *)
     let* created_address :=
       let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
-      let address := environment.(Environment.address) in
       let* nonce := LowM.Primitive Primitive.GetNonce M.pure in
-      let address_bytes := List.firstn 20 (List.skipn 12 (Memory.u256_as_bytes address)) in
-      let nonce_byte := if nonce =? 0 then 128 else nonce in
-      let bytes : list Z := [214; 148] ++ address_bytes ++ [nonce_byte] in
-      let bytes : list Nibble.byte := Memory.bytes_as_bytes bytes in
-      let hash : list Nibble.byte := RocqEvm.Crypto.Keccak.keccak_256 bytes in
-      let hash : list Z := (List.map (fun byte => Z.of_N (Nibble.N_of_byte byte))) hash in
-      M.pure (Z.land ((2 ^ 160) - 1) (Memory.bytes_as_u256 hash)) in
+      M.pure
+        (StdlibAux.contract_creation_address
+          environment.(Environment.address)
+          nonce) in
     if n <? 32 then
       let* tt := LowM.Primitive (Primitive.CreateAccount created_address 0 []) M.pure in
       M.pure created_address
@@ -1087,15 +2256,15 @@ Module Stdlib.
       let* tt := LowM.Primitive (Primitive.RStore []) M.pure in
       M.pure 0
     else
-      match precompile_output a [] with
-      | Some _ => call_precompile a in_ insize out outsize
-      | None =>
+      if precompile_known_address a then
+        call_precompile a in_ insize out outsize
+      else
         let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
         let* result := LowM.CallContract a v input false false M.pure in
         let* output := LowM.Primitive Primitive.RLoad M.pure in
         LowM.Primitive (Primitive.MStore out (List.firstn (Z.to_nat outsize) output)) (fun _ =>
         M.pure result)
-      end.
+      .
 
   Definition callcode (g a v in_ insize out outsize : U256.t) : M.t U256.t :=
     LowM.Impossible "callcode".
@@ -1108,15 +2277,15 @@ Module Stdlib.
     M.pure result).
 
   Definition staticcall (g a in_ insize out outsize : U256.t) : M.t U256.t :=
-    match precompile_output a [] with
-    | Some _ => call_precompile a in_ insize out outsize
-    | None =>
+    if precompile_known_address a then
+      call_precompile a in_ insize out outsize
+    else
       let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
       let* result := LowM.CallContract a 0 input true false M.pure in
       let* output := LowM.Primitive Primitive.RLoad M.pure in
       LowM.Primitive (Primitive.MStore out (List.firstn (Z.to_nat outsize) output)) (fun _ =>
       M.pure result)
-    end.
+    .
 
   Definition return_ (p s : U256.t) : M.t unit :=
     LowM.Pure (Result.Return p s).
@@ -1169,19 +2338,33 @@ Module Stdlib.
     M.pure tt.
 
   Definition chainid : M.t U256.t :=
-    M.pure 1.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    if Protocol.has_chainid environment.(Environment.protocol) then
+      M.pure environment.(Environment.chain_id)
+    else
+      LowM.Impossible "CHAINID is not available before Istanbul".
 
   Definition basefee : M.t U256.t :=
-    M.pure 7.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    if Protocol.has_basefee environment.(Environment.protocol) then
+      M.pure environment.(Environment.block_base_fee)
+    else
+      LowM.Impossible "BASEFEE is not available before London".
 
   Definition blobbasefee : M.t U256.t :=
-    M.pure 1.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    if Protocol.has_cancun_opcodes environment.(Environment.protocol) then
+      M.pure environment.(Environment.block_blob_base_fee)
+    else
+      LowM.Impossible "BLOBBASEFEE is not available before Cancun".
 
   Definition origin : M.t U256.t :=
-    M.pure 0x9292929292929292929292929292929292929292.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    M.pure environment.(Environment.origin).
 
   Definition gasprice : M.t U256.t :=
-    M.pure 3000000000.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    M.pure environment.(Environment.gas_price).
 
   Definition blockhash (b : U256.t) : M.t U256.t :=
     let* block_number := LowM.Primitive Primitive.GetBlockNumber M.pure in
@@ -1191,15 +2374,21 @@ Module Stdlib.
       M.pure 0.
 
   Definition blobhash (i : U256.t) : M.t U256.t :=
-    if i =? 0 then
-      M.pure 0x0100000000000000000000000000000000000000000000000000000000000001
-    else if i =? 1 then
-      M.pure 0x0100000000000000000000000000000000000000000000000000000000000002
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    if Protocol.has_cancun_opcodes environment.(Environment.protocol) then
+      if i <? Z.of_nat (List.length environment.(Environment.blob_hashes)) then
+        match List.nth_error environment.(Environment.blob_hashes) (Z.to_nat i) with
+        | Some blob_hash => M.pure blob_hash
+        | None => M.pure 0
+        end
+      else
+        M.pure 0
     else
-      M.pure 0.
+      LowM.Impossible "BLOBHASH is not available before Cancun".
 
   Definition coinbase : M.t U256.t :=
-    M.pure 0x7878787878787878787878787878787878787878.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    M.pure environment.(Environment.block_coinbase).
 
   Definition timestamp : M.t U256.t :=
     LowM.Primitive Primitive.GetBlockTimestamp M.pure.
@@ -1208,13 +2397,16 @@ Module Stdlib.
     LowM.Primitive Primitive.GetBlockNumber M.pure.
 
   Definition difficulty : M.t U256.t :=
-    M.pure 0xa86c2e601b6c44eb4848f7d23d9df3113fbcac42041c49cbed5000cb4f118777.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    M.pure environment.(Environment.block_difficulty).
 
   Definition prevrandao : M.t U256.t :=
-    M.pure 0xa86c2e601b6c44eb4848f7d23d9df3113fbcac42041c49cbed5000cb4f118777.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    M.pure environment.(Environment.block_prev_randao).
 
   Definition gaslimit : M.t U256.t :=
-    M.pure 20000000.
+    let* environment := LowM.Primitive Primitive.GetEnvironment M.pure in
+    M.pure environment.(Environment.block_gas_limit).
 
   Definition loadimmutable (name : U256.t) : M.t U256.t :=
     LowM.Primitive (Primitive.LoadImmutable name) M.pure.
@@ -1476,7 +2668,11 @@ Definition eval_primitive {A : Set}
       let address := environment.(Environment.address) in
       let accounts :=
         Dict.assign_function state.(State.accounts) address (fun account =>
-          account <| Account.storage := Storage.update account.(Account.storage) slot value |>
+          account
+            <| Account.storage := Storage.update account.(Account.storage) slot value |>
+            <| Account.storage_keys :=
+              storage_keys_after_update slot value account.(Account.storage_keys)
+            |>
         ) in
       match accounts with
       | None => inr ("storage not found for the address " ++ HexString.of_Z address)%string
@@ -1488,13 +2684,13 @@ Definition eval_primitive {A : Set}
       end
   | Primitive.RLoad =>
     inl (
-      state.(State.return_data),
+      ReturnData.to_list state.(State.return_data),
       state
     )
   | Primitive.RStore bytes =>
     inl (
       tt,
-      state <| State.return_data := bytes |>
+      state <| State.return_data := ReturnData.of_bytes bytes |>
     )
   | Primitive.TLoad address =>
     inl (
@@ -1518,7 +2714,7 @@ Definition eval_primitive {A : Set}
   | Primitive.GetGas =>
     inl (
       state.(State.gas),
-      state <| State.gas := state.(State.gas) - 1 |>
+      state
     )
   | Primitive.GetBlockNumber =>
     inl (
@@ -1536,7 +2732,15 @@ Definition eval_primitive {A : Set}
     else
       inl (
         tt,
-        state <| State.logs := (topics, payload) :: state.(State.logs) |>
+        state <| State.logs := Log.of_bytes topics payload :: state.(State.logs) |>
+      )
+  | Primitive.LogMemory topics offset size =>
+    if state.(State.is_static) then
+      inr "static state change"
+    else
+      inl (
+        tt,
+        state <| State.logs := Log.of_memory topics state.(State.memory) offset size :: state.(State.logs) |>
       )
   | Primitive.GetEnvironment =>
     inl (
@@ -1570,10 +2774,16 @@ Definition eval_primitive {A : Set}
     | Some account =>
       let code_bytes :=
         if address =? environment.(Environment.address) then
-          if is_deployed_code_name environment.(Environment.code_name) then
-            current_deployed_code_bytes account.(Account.code)
-          else
+          if andb
+              (account.(Account.nonce) =? -1)
+              (negb (is_deployed_code_name environment.(Environment.code_name))) then
             []
+          else if is_deployed_code_name environment.(Environment.code_name) then
+            current_deployed_code_bytes account.(Account.code)
+          else if account.(Account.code) =? 0 then
+            account.(Account.codedata)
+          else
+            Memory.u256_as_bytes account.(Account.code) ++ account.(Account.codedata)
         else
           if account.(Account.code) =? 0 then
             account.(Account.codedata)
@@ -1631,7 +2841,8 @@ Definition eval_primitive {A : Set}
         Account.nonce := -1;
         Account.code := code;
         Account.codedata := codedata;
-        Account.storage := Memory.empty;
+        Account.storage := Storage.empty;
+        Account.storage_keys := [];
         Account.immutables := [];
       |} in
       inl (
@@ -1678,12 +2889,19 @@ Definition eval_primitive {A : Set}
     if state.(State.is_static) then
       inr "static state change"
     else
+      let beneficiary := StdlibAux.address_of_word beneficiary in
       let address := environment.(Environment.address) in
       let accounts := state.(State.accounts) in
       match Dict.get accounts address with
       | None => inr ("selfdestruct: account not found for the address " ++ HexString.of_Z address)%string
       | Some current_account =>
         let transferred_value := current_account.(Account.balance) in
+        let destructive :=
+          orb
+            (negb (Protocol.has_cancun_opcodes environment.(Environment.protocol)))
+            (orb
+              (current_account.(Account.nonce) =? -1)
+              (u256_in address state.(State.created_accounts))) in
         let accounts :=
           match Dict.assign_function accounts address (fun account =>
             account <| Account.balance := 0 |>
@@ -1697,22 +2915,24 @@ Definition eval_primitive {A : Set}
             Account.nonce := 0;
             Account.code := 0;
             Account.codedata := [];
-            Account.storage := Memory.empty;
+            Account.storage := Storage.empty;
+            Account.storage_keys := [];
             Account.immutables := [];
           |} in
         let accounts :=
-          match Dict.assign_function accounts beneficiary (fun account =>
-            account <| Account.balance := account.(Account.balance) + transferred_value |>
-          ) with
-          | Some accounts => accounts
-          | None => Dict.declare accounts beneficiary beneficiary_account
-          end in
+          if andb destructive (address =? beneficiary) then
+            accounts
+          else
+            match Dict.assign_function accounts beneficiary (fun account =>
+              account <| Account.balance := account.(Account.balance) + transferred_value |>
+            ) with
+            | Some accounts => accounts
+            | None => Dict.declare accounts beneficiary beneficiary_account
+            end in
         inl (
           tt,
           let state := state <| State.accounts := accounts |> in
-          if orb
-              (current_account.(Account.nonce) =? -1)
-              (u256_in address state.(State.created_accounts)) then
+          if destructive then
             state
               <| State.selfdestructed_created_accounts :=
                 address :: state.(State.selfdestructed_created_accounts)
@@ -1847,13 +3067,16 @@ Fixpoint eval {A : Set}
       | inr output => eval fuel codes environment (k output)
       end
     | LowM.CallContract address value input is_static is_delegate k => fun state =>
+      let address := StdlibAux.address_of_word address in
       let effective_static := orb state.(State.is_static) is_static in
       let current_account := Dict.get state.(State.accounts) environment.(Environment.address) in
       match current_account with
       | None => (inr ("balance not found for the address " ++ HexString.of_Z environment.(Environment.address))%string, state)
       | Some current_account =>
-        if andb (negb is_delegate) (andb effective_static (negb (value =? 0))) then
-          eval fuel codes environment (k 0) (state <| State.return_data := [] |>)
+        if call_depth_exceeded state then
+          eval fuel codes environment (k 0) (state <| State.return_data := ReturnData.empty |>)
+        else if andb (negb is_delegate) (andb effective_static (negb (value =? 0))) then
+          eval fuel codes environment (k 0) (state <| State.return_data := ReturnData.empty |>)
         else if andb (negb is_delegate) (value >? current_account.(Account.balance)) then
           (* When there is not enough balance, the call fails but we do not revert. *)
           eval fuel codes environment (k 0) state
@@ -1875,7 +3098,8 @@ Fixpoint eval {A : Set}
                   Account.nonce := 0;
                   Account.code := 0;
                   Account.codedata := [];
-                  Account.storage := Memory.empty;
+                  Account.storage := Storage.empty;
+                  Account.storage_keys := [];
                   Account.immutables := [];
                 |} in
                 state <| State.accounts := Dict.declare state.(State.accounts) address account |>
@@ -1887,18 +3111,29 @@ Fixpoint eval {A : Set}
             let callee_address : U256.t :=
               if is_delegate then environment.(Environment.address) else address in
             let callee_environment := {|
+              Environment.protocol := environment.(Environment.protocol);
               Environment.caller :=
                 if is_delegate then environment.(Environment.caller) else environment.(Environment.address);
+              Environment.origin := environment.(Environment.origin);
               Environment.callvalue :=
                 if is_delegate then environment.(Environment.callvalue) else value;
+              Environment.gas_price := environment.(Environment.gas_price);
               Environment.calldata := input;
               Environment.address := callee_address;
               Environment.code_name := callee_code_name;
+              Environment.chain_id := environment.(Environment.chain_id);
+              Environment.block_coinbase := environment.(Environment.block_coinbase);
+              Environment.block_gas_limit := environment.(Environment.block_gas_limit);
+              Environment.block_difficulty := environment.(Environment.block_difficulty);
+              Environment.block_prev_randao := environment.(Environment.block_prev_randao);
+              Environment.block_base_fee := environment.(Environment.block_base_fee);
+              Environment.block_blob_base_fee := environment.(Environment.block_blob_base_fee);
+              Environment.blob_hashes := environment.(Environment.blob_hashes);
             |} in
             if andb
                 (address =? environment.(Environment.address))
                 (negb (is_deployed_code_name environment.(Environment.code_name))) then
-              eval fuel codes environment (k 1) (state <| State.return_data := [] |>)
+              eval fuel codes environment (k 1) (state <| State.return_data := ReturnData.empty |>)
             else
             if callee_account.(Account.code) =? 0 then
               if StdlibAux.bytes_eqb (List.firstn 4 input) [12; 8; 191; 136] then
@@ -1910,7 +3145,7 @@ Fixpoint eval {A : Set}
                       <| State.selfdestructed_created_accounts :=
                         callee_state.(State.selfdestructed_created_accounts)
                       |> in
-                  eval fuel codes environment (k 1) (state <| State.return_data := [] |>)
+                  eval fuel codes environment (k 1) (state <| State.return_data := ReturnData.empty |>)
                 | inr error => (inr error, state)
                 end
               else
@@ -1919,7 +3154,7 @@ Fixpoint eval {A : Set}
                     List.repeat 0 32
                   else
                     [] in
-                eval fuel codes environment (k 1) (state <| State.return_data := output |>)
+                eval fuel codes environment (k 1) (state <| State.return_data := ReturnData.of_bytes output |>)
             else
             match
               if is_delegate then
@@ -1939,6 +3174,13 @@ Fixpoint eval {A : Set}
                 <| State.accounts := state.(State.accounts) |>
                 <| State.transient_storage := state.(State.transient_storage) |>
                 <| State.gas := state.(State.gas) |>
+                <| State.gas_refund := state.(State.gas_refund) |>
+                <| State.call_depth := S state.(State.call_depth) |>
+                <| State.precompile_cache := state.(State.precompile_cache) |>
+                <| State.ecrecover_cache := state.(State.ecrecover_cache) |>
+                <| State.warm_addresses := state.(State.warm_addresses) |>
+                <| State.warm_storage_keys := state.(State.warm_storage_keys) |>
+                <| State.original_accounts := state.(State.original_accounts) |>
                 <| State.is_static := effective_static |>
                 <| State.block_number := state.(State.block_number) |>
                 <| State.block_timestamp := state.(State.block_timestamp) |>
@@ -1951,7 +3193,7 @@ Fixpoint eval {A : Set}
             match result with
             | inr "static state change" =>
               if effective_static then
-                eval fuel codes environment (k 0) (state <| State.return_data := [] |>)
+                eval fuel codes environment (k 0) (state <| State.return_data := ReturnData.empty |>)
               else
                 (inr "static state change", state)
             | inr error => (inr error, state)
@@ -1962,11 +3204,16 @@ Fixpoint eval {A : Set}
                   <| State.accounts := callee_state.(State.accounts) |>
                   <| State.transient_storage := callee_state.(State.transient_storage) |>
                   <| State.gas := callee_state.(State.gas) |>
+                  <| State.gas_refund := callee_state.(State.gas_refund) |>
+                  <| State.precompile_cache := callee_state.(State.precompile_cache) |>
+                  <| State.ecrecover_cache := callee_state.(State.ecrecover_cache) |>
+                  <| State.warm_addresses := callee_state.(State.warm_addresses) |>
+                  <| State.warm_storage_keys := callee_state.(State.warm_storage_keys) |>
                   <| State.created_accounts := callee_state.(State.created_accounts) |>
                   <| State.selfdestructed_created_accounts :=
                     callee_state.(State.selfdestructed_created_accounts)
                   |>
-                  <| State.return_data := Memory.get_bytes callee_state.(State.memory) p s |> in
+                  <| State.return_data := ReturnData.of_memory callee_state.(State.memory) p s |> in
               eval fuel codes environment (k 1) state
             | inl (Result.Revert p s) =>
               let state :=
@@ -1974,11 +3221,14 @@ Fixpoint eval {A : Set}
                   <| State.accounts := callee_state.(State.accounts) |>
                   <| State.transient_storage := callee_state.(State.transient_storage) |>
                   <| State.gas := callee_state.(State.gas) |>
+                  <| State.gas_refund := callee_state.(State.gas_refund) |>
+                  <| State.precompile_cache := callee_state.(State.precompile_cache) |>
+                  <| State.ecrecover_cache := callee_state.(State.ecrecover_cache) |>
                   <| State.created_accounts := callee_state.(State.created_accounts) |>
                   <| State.selfdestructed_created_accounts :=
                     callee_state.(State.selfdestructed_created_accounts)
                   |>
-                  <| State.return_data := Memory.get_bytes callee_state.(State.memory) p s |> in
+                  <| State.return_data := ReturnData.of_memory callee_state.(State.memory) p s |> in
               eval fuel codes environment (k 0) state
             end
           end
