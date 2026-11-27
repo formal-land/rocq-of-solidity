@@ -980,8 +980,7 @@ Definition run (fixture : t) : Step.t * State.t :=
             <| State.created_accounts :=
               created_address fixture :: rollback_base.(State.created_accounts) |> in
 	        let result :=
-	          Semantics.run
-	            fixture.(steps)
+	          Semantics.run_with_gas
 	            fixture.(steps)
 	            fixture.(codes)
 	            (environment fixture)
@@ -1002,8 +1001,7 @@ Definition run (fixture : t) : Step.t * State.t :=
           run_top_level_precompile fixture rollback_base before
         else
 	        let result :=
-	          Semantics.run
-	            fixture.(steps)
+	          Semantics.run_with_gas
 	            fixture.(steps)
 	            fixture.(codes)
 	            (environment fixture)

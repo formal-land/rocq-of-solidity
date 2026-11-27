@@ -117,11 +117,15 @@ and a 15-minute timeout. The default is one worker. Set `EVM_FIXTURE_JOBS` to in
 when sufficient memory is available. Manually running the **Rocq** workflow
 checks the full historical suite in 32 shards and runs the Osaka fixtures once.
 
-The pinned suite definitions use inclusive case ranges in the archive’s
-sorted JSON path order, then each JSON object's original test, fork, and post
-order. Each suite SHA-256 covers its case filenames and contents in sorted
-filename order. These values come from the fixture trees at fork commit
-`40651b12f8`. The probe manifests import their own modules.
+The historical suites use inclusive ranges in the archive’s sorted JSON path
+order, followed by each JSON object’s original test, fork, and post order.
+Their digests come from the fixture trees at fork commit `40651b12f8`.
+The Osaka suite selects fixture paths and reads their Osaka post-states.
+Each suite SHA-256 covers its case filenames and contents in sorted filename
+order. The probe manifests import their own modules.
+
+Each transaction frame uses its available gas to bound opcode execution. The
+fixture’s step hint supplies fuel for recursive calls and Solidity primitives.
 
 ## 📚 Example
 

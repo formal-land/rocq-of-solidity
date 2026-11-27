@@ -3363,6 +3363,13 @@ Definition try_fast_forward_transient_oog_loop
   else
     None.
 
+Definition run_step (run_call : call_runner) (steps fuel : nat) (codes : Codes.t)
+    (environment : Environment.t) (frame : Frame.t) (state : State.t) : Step.t * State.t :=
+  match try_fast_forward_transient_oog_loop environment frame state with
+  | Some result => result
+  | None => step_with_runner run_call steps fuel codes environment frame state
+  end.
+
 Fixpoint run
     (fuel steps : nat)
     (codes : Codes.t)
@@ -3380,17 +3387,36 @@ Fixpoint run
       match steps with
       | O => (Step.Error "out of steps", state)
       | S steps' =>
-        let result :=
-          match try_fast_forward_transient_oog_loop environment frame state with
-          | Some result => result
-          | None =>
-            step_with_runner
-              run_call steps' fuel' codes environment frame state
-          end in
-        match result with
+        match run_step run_call steps' fuel' codes environment frame state with
         | (Step.Continue frame, state) => loop steps' frame state
         | result => result
         end
       end in
     loop steps frame state
+  end.
+
+(** A continuing instruction consumes at least one unit of gas. Include one
+    more instruction for a terminal STOP or error. Splitting this budget into
+    powers of two avoids allocating a unary step counter as large as the gas
+    limit. Each child frame receives its own forwarded gas. *)
+Fixpoint run_with_gas (fuel : nat) (codes : Codes.t) (environment : Environment.t)
+    (frame : Frame.t) (state : State.t) : Step.t * State.t :=
+  match fuel with
+  | O => (Step.Error "out of fuel", state)
+  | S fuel' =>
+    let run_call : call_runner := fun _ => run_with_gas fuel' in
+    let fix execute_chunk (power : nat) (frame : Frame.t) (state : State.t) :=
+      match power with
+      | O => run_step run_call O fuel' codes environment frame state
+      | S smaller =>
+        match execute_chunk smaller frame state with
+        | (Step.Continue next, after) => execute_chunk smaller next after
+        | result => result
+        end
+      end in
+    let power := Z.to_nat (Z.log2_up (1 + Z.max 0 state.(State.gas))) in
+    match execute_chunk power frame state with
+    | (Step.Continue _, after) => (Step.Error "out of steps", after)
+    | result => result
+    end
   end.

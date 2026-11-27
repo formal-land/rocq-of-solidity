@@ -49,6 +49,11 @@ Definition run (fixture : Fixture.t) : Step.t * State.t :=
 Definition storage_at_test_contract (fixture : Fixture.t) (slot : U256.t) : option U256.t :=
   Fixture.storage_after (run fixture) test_contract slot.
 
+Example transaction_can_execute_more_opcodes_than_its_fixture_step_hint :
+  storage_at_test_contract (simple_tx_fixture "gas-bounded execution"
+    (List.repeat 91 100 ++ [96; 1; 96; 0; 85; 0])) 0 = Some 1.
+Proof. vm_compute. reflexivity. Qed.
+
 Definition miner_settlement_fixture
     (protocol : Protocol.t) (miner price : Z) (code : list Z) : Fixture.t := {|
   Fixture.name := "miner settlement";
