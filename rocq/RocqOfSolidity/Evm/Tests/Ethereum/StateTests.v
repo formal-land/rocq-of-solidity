@@ -195,3 +195,19 @@ Proof. vm_compute. reflexivity. Qed.
 Example test_stSelfDestruct_beneficiary_balance :
   Fixture.balance_after (run stSelfDestruct_balance_transfer) test_beneficiary = Some 100.
 Proof. vm_compute. reflexivity. Qed.
+
+Definition gas_cap_fixture (protocol : Protocol.t) (limit : Z) : Fixture.t :=
+  {| Fixture.name := "transaction gas limit cap";
+     Fixture.protocol := protocol;
+     Fixture.codes := [];
+     Fixture.pre := [Fixture.Alloc.make test_sender 1000 0 [] [] ];
+     Fixture.block := default_block;
+     Fixture.transaction := Fixture.Transaction.make test_sender test_contract 0 limit 0 [];
+     Fixture.steps := 80 |}.
+
+Example transaction_gas_cap_activates_at_osaka :
+  (Fixture.error_after (run (gas_cap_fixture Protocol.Prague (2 ^ 24 + 1))),
+   Fixture.error_after (run (gas_cap_fixture Protocol.Osaka (2 ^ 24))),
+   Fixture.error_after (run (gas_cap_fixture Protocol.Osaka (2 ^ 24 + 1)))) =
+  (None, None, Some "invalid transaction: gas limit exceeds protocol cap").
+Proof. vm_compute. reflexivity. Qed.

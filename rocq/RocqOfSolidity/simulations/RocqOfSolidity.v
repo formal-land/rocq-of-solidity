@@ -4,6 +4,8 @@ Require RocqOfSolidity.RocqEvm.Crypto.BLAKE2b.
 Require RocqOfSolidity.RocqEvm.Crypto.Keccak.
 Require RocqOfSolidity.RocqEvm.Crypto.RIPEMD160.
 Require RocqOfSolidity.RocqEvm.Crypto.SHA256.
+Require RocqOfSolidity.RocqEvm.Crypto.KZG.
+Require RocqOfSolidity.RocqEvm.Crypto.P256.
 Require Import Coq.ZArith.Znumtheory.
 From Bignums Require Import BigN.BigN.
 
@@ -295,14 +297,16 @@ Module Memory.
         byte_tree_lookup right_tree address
     end.
 
-  (** Get the bytes from some memory from a start adress and for a certain length. *)
-  Definition get_bytes (memory : Memory.t) (start length : U256.t) : list Z :=
-    List.map
-      (fun (i : nat) =>
-        let address : U256.t := start + Z.of_nat i in
-        memory address
-      )
-      (List.seq 0 (Z.to_nat length)).
+  (* Increment the binary address directly. Converting every unary list index
+     to Z makes reading the deployed runtime code quadratic in its size. *)
+  Fixpoint read_bytes (memory : t) (address : U256.t) (n : nat) (acc : list Z) : list Z :=
+    match n with
+    | O => List.rev_append acc []
+    | S k => read_bytes memory (address + 1) k (memory address :: acc)
+    end.
+
+  Definition get_bytes (memory : t) (start length : U256.t) : list Z :=
+    read_bytes memory start (Z.to_nat length) [].
 
   Definition update_bytes (memory : Memory.t) (start : U256.t) (bytes : list Z) : Memory.t :=
     let tree := byte_tree_of_bytes start bytes in
@@ -2119,7 +2123,43 @@ Module Stdlib.
     | _ => false
     end.
 
-  Definition precompile_run_result
+  Definition precompile_active (protocol : Protocol.t) (address : U256.t) : bool :=
+    match address with
+    | 1 | 2 | 3 | 4 => true
+    | 5 | 6 | 7 | 8 => Protocol.has_byzantium_opcodes protocol
+    | 9 => Protocol.has_istanbul_opcodes protocol
+    | 10 => Protocol.has_cancun_opcodes protocol
+    | 11 | 12 | 13 | 14 | 15 | 16 | 17 =>
+      match protocol with Protocol.Prague | Protocol.Osaka => true | _ => false end
+    | 256 => Protocol.has_osaka_opcodes protocol
+    | _ => false
+    end.
+
+  Definition point_evaluation (input : list Z) : precompile_result :=
+    if Nat.eqb (List.length input) 192 then
+      let commitment := List.firstn 48 (List.skipn 96 input) in
+      let digest := StdlibAux.crypto_bytes_as_z
+        (RocqEvm.Crypto.SHA256.sha256 (Memory.bytes_as_bytes commitment)) in
+      if StdlibAux.bytes_eqb (List.firstn 32 input) (1 :: List.skipn 1 digest) &&
+         KZG.verify (Memory.bytes_as_u256 commitment)
+           (modexp_word input 32) (modexp_word input 64)
+           (Memory.bytes_as_u256 (List.skipn 144 input)) then
+        PrecompileSuccess (Memory.u256_as_bytes 4096 ++ Memory.u256_as_bytes KZG.order)
+      else PrecompileFailure
+    else PrecompileFailure.
+
+  Definition p256verify (input : list Z) : list Z :=
+    if Nat.eqb (List.length input) 160 &&
+       P256.verify (modexp_word input 0) (modexp_word input 32)
+         (modexp_word input 64) (modexp_word input 96) (modexp_word input 128)
+    then Memory.u256_as_bytes 1 else [].
+
+  Definition modexp_lengths_valid (protocol : Protocol.t) (input : list Z) : bool :=
+    negb (Protocol.has_osaka_opcodes protocol) ||
+    ((modexp_base_length input <=? 1024) && (modexp_exponent_length input <=? 1024) &&
+     (modexp_modulus_length input <=? 1024)).
+
+  Definition precompile_run_for_protocol (protocol : Protocol.t)
       (address : U256.t) (input : list Z) : option precompile_result :=
     match address with
     | 1 =>
@@ -2137,7 +2177,9 @@ Module Stdlib.
         )
       ))
     | 4 => Some (PrecompileSuccess input)
-    | 5 => Some (PrecompileSuccess (modexp_output input))
+    | 5 =>
+      if modexp_lengths_valid protocol input then Some (PrecompileSuccess (modexp_output input))
+      else Some PrecompileFailure
     | 6 =>
       match bn254_ecadd_result input with
       | Some output => Some (PrecompileSuccess output)
@@ -2158,14 +2200,14 @@ Module Stdlib.
       | Some output => Some (PrecompileSuccess output)
       | None => Some PrecompileFailure
       end
-    | 10 =>
-      Some PrecompileFailure
+    | 10 => Some (point_evaluation input)
     | 11 | 12 | 13 | 14 | 15 | 16 | 17 =>
       Some PrecompileFailure
-    | 256 =>
-      Some (PrecompileSuccess [])
+    | 256 => Some (PrecompileSuccess (p256verify input))
     | _ => None
     end.
+
+  Definition precompile_run_result := precompile_run_for_protocol Protocol.default.
 
   Definition precompile_output (address : U256.t) (input : list Z) : option (list Z) :=
     match precompile_run_result address input with
@@ -2173,9 +2215,9 @@ Module Stdlib.
     | _ => None
     end.
 
-  Definition call_precompile (a in_ insize out outsize : U256.t) : M.t U256.t :=
-    let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
-    match precompile_run_result a input with
+  Definition call_precompile_input (protocol : Protocol.t) (a out outsize : U256.t)
+      (input : list Z) : M.t U256.t :=
+    match precompile_run_for_protocol protocol a input with
     | None => LowM.Impossible "precompile not found"
     | Some PrecompileFailure =>
       let* tt := LowM.Primitive (Primitive.RStore []) M.pure in
@@ -2188,6 +2230,11 @@ Module Stdlib.
           M.pure in
       M.pure 1
     end.
+
+  Definition call_precompile (a in_ insize out outsize : U256.t) : M.t U256.t :=
+    let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
+    let* env := LowM.Primitive Primitive.GetEnvironment M.pure in
+    call_precompile_input env.(Environment.protocol) a out outsize input.
 
   Definition create (v p n : U256.t) : M.t U256.t :=
     let* created_address :=
@@ -2251,20 +2298,26 @@ Module Stdlib.
             LowM.Primitive (Primitive.UpdateCodeBytesForDeploy created_address constructor_output) (fun _ =>
             M.pure created_address).
 
+  Definition external_call (a value in_ insize out outsize : U256.t)
+      (is_static : bool) : M.t U256.t :=
+    let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
+    let ordinary_call := fun _ : unit =>
+      let* result := LowM.CallContract a value input is_static false M.pure in
+      let* output := LowM.Primitive Primitive.RLoad M.pure in
+      let* tt := LowM.Primitive (Primitive.MStore out (List.firstn (Z.to_nat outsize) output)) M.pure in
+      M.pure result in
+    if precompile_known_address a then
+      let* env := LowM.Primitive Primitive.GetEnvironment M.pure in
+      if precompile_active env.(Environment.protocol) a then
+        call_precompile_input env.(Environment.protocol) a out outsize input
+      else ordinary_call tt
+    else ordinary_call tt.
+
   Definition call (g a v in_ insize out outsize : U256.t) : M.t U256.t :=
     if andb (g <? 100) (v =? 0) then
       let* tt := LowM.Primitive (Primitive.RStore []) M.pure in
       M.pure 0
-    else
-      if precompile_known_address a then
-        call_precompile a in_ insize out outsize
-      else
-        let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
-        let* result := LowM.CallContract a v input false false M.pure in
-        let* output := LowM.Primitive Primitive.RLoad M.pure in
-        LowM.Primitive (Primitive.MStore out (List.firstn (Z.to_nat outsize) output)) (fun _ =>
-        M.pure result)
-      .
+    else external_call a v in_ insize out outsize false.
 
   Definition callcode (g a v in_ insize out outsize : U256.t) : M.t U256.t :=
     LowM.Impossible "callcode".
@@ -2277,15 +2330,7 @@ Module Stdlib.
     M.pure result).
 
   Definition staticcall (g a in_ insize out outsize : U256.t) : M.t U256.t :=
-    if precompile_known_address a then
-      call_precompile a in_ insize out outsize
-    else
-      let* input := LowM.Primitive (Primitive.MLoad in_ insize) M.pure in
-      let* result := LowM.CallContract a 0 input true false M.pure in
-      let* output := LowM.Primitive Primitive.RLoad M.pure in
-      LowM.Primitive (Primitive.MStore out (List.firstn (Z.to_nat outsize) output)) (fun _ =>
-      M.pure result)
-    .
+    external_call a 0 in_ insize out outsize true.
 
   Definition return_ (p s : U256.t) : M.t unit :=
     LowM.Pure (Result.Return p s).

@@ -140,7 +140,7 @@ Definition instruction_of_Z (z : Z) : option instruction :=
 
 Definition valid_jump_destinations_of_code (code : list Z) : list U256.t :=
   List.map Z.of_N
-    (paper_valid_jump_destinations_from (Memory.bytes_as_bytes code) 0 (S (List.length code))).
+    (valid_jump_destinations (Memory.bytes_as_bytes code)).
 
 Definition make_frame (code : list Z) : Frame.t := {|
   Frame.pc := 0;
@@ -628,11 +628,7 @@ Module Gas.
     (account.(Account.balance) =? 0) &&
     (account.(Account.nonce) =? 0) &&
     (account.(Account.code) =? 0) &&
-    StdlibAux.bytes_eqb account.(Account.codedata) [] &&
-    match account.(Account.storage_keys) with
-    | [] => true
-    | _ :: _ => false
-    end.
+    StdlibAux.bytes_eqb account.(Account.codedata) [].
 
   Definition selfdestruct_base_cost (protocol : Protocol.t) : U256.t :=
     match protocol with
@@ -688,23 +684,14 @@ Module Gas.
     if value =? 0 then 0 else call_value_transfer.
 
   Definition call_creates_account
+      (protocol : Protocol.t)
       (value : U256.t)
       (callee_account : option Account.t) : bool :=
-    if value =? 0 then
-      false
-    else
-      match callee_account with
-      | None => true
-      | Some account => account_empty account
-      end.
-
-  Definition call_new_account_cost
-      (value : U256.t)
-      (callee_account : option Account.t) : U256.t :=
-    if call_creates_account value callee_account then
-      call_new_account
-    else
-      0.
+    match callee_account with
+    | None => negb (Protocol.has_byzantium_opcodes protocol && (value =? 0))
+    | Some account =>
+      Protocol.has_byzantium_opcodes protocol && negb (value =? 0) && account_empty account
+    end.
 
   Definition call_dynamic_cost
       (protocol : Protocol.t)
@@ -713,7 +700,7 @@ Module Gas.
       (callee_account : option Account.t) : U256.t :=
     call_base_cost protocol warm +
     call_value_cost value +
-    call_new_account_cost value callee_account.
+    (if call_creates_account protocol value callee_account then call_new_account else 0).
 
   Definition call_dynamic_cost_without_new_account
       (protocol : Protocol.t)
@@ -1036,10 +1023,15 @@ Definition credit_call_account
     ).
 
 Definition transfer_call_value
-    (from to value : U256.t)
+    (environment : Environment.t) (to value : U256.t)
     (state : State.t) : State.t + string :=
+  let from := environment.(Environment.address) in
   if value =? 0 then
-    inl state
+    match environment.(Environment.protocol), Dict.get state.(State.accounts) to with
+    | (Protocol.Frontier | Protocol.Homestead), None =>
+      inl (state <| State.accounts := (to, empty_call_account 0) :: state.(State.accounts) |>)
+    | _, _ => inl state
+    end
   else
     match Dict.get state.(State.accounts) from with
     | None =>
@@ -1344,6 +1336,11 @@ Definition deploy_created_code
     end
   end.
 
+Definition deploy_returned_code (protocol : Protocol.t) (created offset size : U256.t)
+    (state : State.t) : option State.t :=
+  if Gas.has_code_size_limit protocol && (Gas.max_code_size <? size) then None
+  else deploy_created_code protocol created (Memory.get_bytes state.(State.memory) offset size) state.
+
 Definition execute_create
     (run_call : call_runner)
     (steps_remaining : nat)
@@ -1450,11 +1447,8 @@ Definition execute_create
                     (consume_child_gas parent_state [])
                 end
               | Step.Halt (Halt.Return return_offset return_size) =>
-                let deployed_code :=
-                  Memory.get_bytes
-                    child_state.(State.memory) return_offset return_size in
-                match deploy_created_code
-                    environment.(Environment.protocol) created deployed_code child_state with
+                match deploy_returned_code environment.(Environment.protocol)
+                    created return_offset return_size child_state with
                 | Some child_state =>
                   continue op (created :: stack) frame
                     (commit_child_state parent_state child_state [])
@@ -1756,7 +1750,9 @@ Definition precompile_memory_input_size
   | 1 => Z.min in_size 128
   | 6 => Z.min in_size 128
   | 7 => Z.min in_size 96
-  | 10 => Z.min in_size 192
+  (* Keep one excess byte so a wrong-sized input still fails validation. *)
+  | 10 => Z.min in_size 193
+  | 256 => Z.min in_size 161
   | _ => in_size
   end.
 
@@ -1765,7 +1761,7 @@ Definition available_precompile_result
     (address : U256.t)
     (input : list Z) : option Stdlib.precompile_result :=
   match precompile_gas protocol address input with
-  | Some _ => Stdlib.precompile_run_result address input
+  | Some _ => Stdlib.precompile_run_for_protocol protocol address input
   | None => None
   end.
 
@@ -1943,7 +1939,7 @@ Definition precompile_success_state
     (state : State.t) : State.t :=
   state <| State.return_data := ReturnData.of_bytes output |>.
 
-Definition run_precompile_result_cached
+Definition run_precompile_result_cached (protocol : Protocol.t)
     (address : U256.t)
     (input : list Z)
     (state : State.t) : bool * list Z * State.t :=
@@ -1955,7 +1951,7 @@ Definition run_precompile_result_cached
       let '(output, state) := run_ecrecover_result_cached input state in
       (true, output, cache_precompile_result address cache_input true output state)
     else
-      match Stdlib.precompile_run_result address input with
+      match Stdlib.precompile_run_for_protocol protocol address input with
       | Some (Stdlib.PrecompileSuccess output) =>
         (true, output, cache_precompile_result address cache_input true output state)
       | Some Stdlib.PrecompileFailure =>
@@ -1979,9 +1975,9 @@ Definition run_precompile_call
       let state_after_cost :=
         state <| State.gas := state.(State.gas) + stipend - cost |> in
       let '(success, output, state_after_cost) :=
-        run_precompile_result_cached address input state_after_cost in
+        run_precompile_result_cached environment.(Environment.protocol) address input state_after_cost in
       if success then
-        match transfer_call_value environment.(Environment.address) address value state_after_cost with
+        match transfer_call_value environment address value state_after_cost with
         | inr _ =>
           (0, [], precompile_failed_state forwarded_gas state)
         | inl state => (1, output, precompile_success_state output state)
@@ -2006,7 +2002,7 @@ Definition run_precompile_callcode
       let state_after_cost :=
         state <| State.gas := state.(State.gas) + stipend - cost |> in
       let '(success, output, state_after_cost) :=
-        run_precompile_result_cached address input state_after_cost in
+        run_precompile_result_cached environment.(Environment.protocol) address input state_after_cost in
       if success then
         (1, output, precompile_success_state output state_after_cost)
       else
@@ -2102,10 +2098,10 @@ Definition run_modexp_precompile_call
     write_precompile_failure op environment out_offset out_size frame stack
       (state <| State.gas := state.(State.gas) - forwarded_gas |>)
   | Some cost =>
-    if cost <=? forwarded_gas + stipend then
+    if (cost <=? forwarded_gas + stipend) && Stdlib.modexp_lengths_valid environment.(Environment.protocol) input then
       let state_after_cost :=
         state <| State.gas := state.(State.gas) + stipend - cost |> in
-      match transfer_call_value environment.(Environment.address) 5 value state_after_cost with
+      match transfer_call_value environment 5 value state_after_cost with
       | inr _ =>
         write_precompile_failure op environment out_offset out_size frame stack
           (state <| State.gas := state.(State.gas) - forwarded_gas |>)
@@ -2133,7 +2129,7 @@ Definition run_modexp_precompile_callcode
     write_precompile_failure op environment out_offset out_size frame stack
       (state <| State.gas := state.(State.gas) - forwarded_gas |>)
   | Some cost =>
-    if cost <=? forwarded_gas + stipend then
+    if (cost <=? forwarded_gas + stipend) && Stdlib.modexp_lengths_valid environment.(Environment.protocol) input then
       let state := state <| State.gas := state.(State.gas) + stipend - cost |> in
       write_precompile_success op environment (Stdlib.modexp_output input)
         out_offset out_size frame stack state
@@ -2188,7 +2184,7 @@ Definition run_identity_precompile_call
     let state_after_cost :=
       state <| State.gas := state.(State.gas) + stipend - cost |> in
     match transfer_call_value
-        environment.(Environment.address) 4 value state_after_cost with
+        environment 4 value state_after_cost with
     | inr _ =>
       write_identity_precompile_failure op environment out_offset out_size
         frame stack (state <| State.gas := state.(State.gas) - forwarded_gas |>)
@@ -2294,7 +2290,11 @@ Definition exec_instruction_with_runner
       let '(warm, state) := Gas.warm_address address state in
       match Gas.charge (Gas.balance_cost environment.(Environment.protocol) warm) state with
       | Some state =>
-        with_primitive_word BALANCE environment (Primitive.GetBalance address) frame stack state
+        let balance := match Dict.get state.(State.accounts) address with
+                       | Some account => account.(Account.balance)
+                       | None => 0
+                       end in
+        continue BALANCE (balance :: stack) frame state
       | None => out_of_gas_error state
       end
     | None => stack_error state
@@ -2387,13 +2387,13 @@ Definition exec_instruction_with_runner
       let '(warm, state) := Gas.warm_address address state in
       match Gas.charge (Gas.ext_code_hash_cost environment.(Environment.protocol) warm) state with
       | Some state =>
-        let '(result, state) := eval_m fuel codes environment (Stdlib.extcodehash address) state in
-        match result with
-        | inl (Result.Ok hash) => continue EXTCODEHASH (hash :: stack) frame state
-        | inl (Result.Return offset size) => (Step.Halt (Halt.Return offset size), state)
-        | inl (Result.Revert offset size) => (Step.Halt (Halt.Revert offset size), state)
-        | inr message => (Step.Error message, state)
-        end
+        let hash := match Dict.get state.(State.accounts) address with
+                    | Some account =>
+                      if Gas.account_empty account then 0
+                      else StdlibAux.keccak256 (account_code_bytes account)
+                    | None => 0
+                    end in
+        continue EXTCODEHASH (hash :: stack) frame state
       | None => out_of_gas_error state
       end
     | None => stack_error state
@@ -2694,7 +2694,7 @@ Definition exec_instruction_with_runner
                     match callee_account with
                     | None =>
                       match transfer_call_value
-                          environment.(Environment.address) address value state with
+                          environment address value state with
                       | inr message => (Step.Error message, state)
                       | inl state =>
                         write_call_output CALL environment 1 [] out_offset out_size
@@ -2706,7 +2706,7 @@ Definition exec_instruction_with_runner
                       let code_bytes := account_code_bytes callee_account in
                       if StdlibAux.bytes_eqb code_bytes [] then
                         match transfer_call_value
-                            environment.(Environment.address) address value state with
+                            environment address value state with
                         | inr message => (Step.Error message, state)
                         | inl state =>
                           write_call_output CALL environment 1 [] out_offset out_size
@@ -2720,7 +2720,7 @@ Definition exec_instruction_with_runner
                         let parent_state :=
                           state <| State.gas := state.(State.gas) - forwarded_gas |> in
                         match transfer_call_value
-                            environment.(Environment.address) address value parent_state with
+                            environment address value parent_state with
                         | inr "insufficient balance" =>
                           write_call_output CALL environment 0 [] out_offset out_size
                             (Frame.with_stack frame stack) stack
@@ -2914,8 +2914,8 @@ Definition exec_instruction_with_runner
       let callee_account := Dict.get state.(State.accounts) address in
       let '(warm, state) := Gas.warm_address address state in
       let extra_cost :=
-        Gas.call_dynamic_cost
-          environment.(Environment.protocol) warm 0 callee_account in
+        Gas.call_dynamic_cost_without_new_account
+          environment.(Environment.protocol) warm 0 in
       match charge_two_memory_regions_and_extra
           in_offset in_size out_offset out_size extra_cost frame state with
       | None => out_of_gas_error state
@@ -2948,7 +2948,7 @@ Definition exec_instruction_with_runner
                 in_offset in_size out_offset out_size
                 (Frame.with_stack frame stack) stack state
                 (fun input state =>
-                  run_precompile_call
+                  run_precompile_callcode
                     environment address 0 forwarded_gas input state) with
             | Some result => result
             | None =>
@@ -3027,8 +3027,8 @@ Definition exec_instruction_with_runner
       let callee_account := Dict.get state.(State.accounts) address in
       let '(warm, state) := Gas.warm_address address state in
       let extra_cost :=
-        Gas.call_dynamic_cost
-          environment.(Environment.protocol) warm 0 callee_account in
+        Gas.call_dynamic_cost_without_new_account
+          environment.(Environment.protocol) warm 0 in
       match charge_two_memory_regions_and_extra
           in_offset in_size out_offset out_size extra_cost frame state with
       | None => out_of_gas_error state
@@ -3061,7 +3061,7 @@ Definition exec_instruction_with_runner
                 in_offset in_size out_offset out_size
                 (Frame.with_stack frame stack) stack state
                 (fun input state =>
-                  run_precompile_call
+                  run_precompile_callcode
                     environment address 0 forwarded_gas input state) with
             | Some result => result
             | None =>

@@ -309,7 +309,8 @@ Example test_ADDRESS :
 Proof. reflexivity. Qed.
 
 Example test_BALANCE :
-  stack_after (exec_on BALANCE [1]) = Some [1].
+  (stack_after (exec_on BALANCE [1]), stack_after (exec_on BALANCE [test_address])) =
+  (Some [0], Some [100]).
 Proof. reflexivity. Qed.
 
 Example test_ORIGIN :
@@ -642,7 +643,7 @@ Example test_POINT_EVALUATION_gas_by_protocol :
   ) = (None, Some 50000).
 Proof. vm_compute. reflexivity. Qed.
 
-Example test_POINT_EVALUATION_unimplemented_proof_failure :
+Example test_POINT_EVALUATION_invalid_versioned_hash :
   Stdlib.precompile_run_result 10 (List.repeat 0 192) =
   Some Stdlib.PrecompileFailure.
 Proof. vm_compute. reflexivity. Qed.

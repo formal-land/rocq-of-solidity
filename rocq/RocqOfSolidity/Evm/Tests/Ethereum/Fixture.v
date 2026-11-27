@@ -236,9 +236,9 @@ Definition increment_transaction_sender_nonce
     (accounts : list (U256.t * Account.t))
     (transaction : Transaction.t) :
     option (list (U256.t * Account.t)) :=
-  Dict.assign_function accounts transaction.(Transaction.caller) (fun account =>
-    account <| Account.nonce := account.(Account.nonce) + 1 |>
-  ).
+  Some (Dict.declare_or_assign_function accounts transaction.(Transaction.caller) (fun current =>
+    let account := match current with Some a => a | None => empty_value_transfer_account 0 end in
+    account <| Account.nonce := account.(Account.nonce) + 1 |>)).
 
 Definition debit_account
     (accounts : list (U256.t * Account.t))
@@ -280,13 +280,17 @@ Definition transaction_fee_cap_cost (transaction : Transaction.t) : U256.t :=
 
 Definition blob_gas_per_blob : U256.t := 131072.
 
-Definition transfer_transaction_value
+Definition transfer_transaction_value (protocol : Protocol.t)
     (accounts : list (U256.t * Account.t))
     (transaction : Transaction.t) :
     option (list (U256.t * Account.t)) :=
   let value := transaction.(Transaction.value) in
   if value =? 0 then
-    Some accounts
+    match protocol, Dict.get accounts transaction.(Transaction.to) with
+    | (Protocol.Frontier | Protocol.Homestead), None =>
+      Some ((transaction.(Transaction.to), empty_value_transfer_account 0) :: accounts)
+    | _, _ => Some accounts
+    end
   else
     match debit_account accounts transaction.(Transaction.caller) value with
     | None => None
@@ -401,7 +405,7 @@ Fixpoint blob_hashes_have_valid_version (hashes : list U256.t) : bool :=
 
 Definition max_blob_count (protocol : Protocol.t) : nat :=
   match protocol with
-  | Protocol.Prague | Protocol.Osaka => 9%nat
+  | Protocol.Prague => 9%nat
   | _ => 6%nat
   end.
 
@@ -574,29 +578,16 @@ Definition transaction_sender_has_no_code (fixture : t) : bool :=
         pre_state.(State.accounts)
         fixture.(transaction).(Transaction.caller) with
     | Some sender => negb (account_has_code sender)
-    | None => false
+    | None => true
     end
   else
     true.
 
 Definition transaction_sender_nonce_not_max (fixture : t) : bool :=
-  let pre_state := pre_transaction_state fixture in
-  match Dict.get
-      pre_state.(State.accounts)
-      fixture.(transaction).(Transaction.caller) with
-  | Some sender => sender.(Account.nonce) <? max_sender_nonce
-  | None => false
-  end.
+  sender_nonce fixture <? max_sender_nonce.
 
 Definition transaction_nonce_matches_sender (fixture : t) : bool :=
-  let pre_state := pre_transaction_state fixture in
-  match Dict.get
-      pre_state.(State.accounts)
-      fixture.(transaction).(Transaction.caller) with
-  | Some sender =>
-    sender.(Account.nonce) =? fixture.(transaction).(Transaction.nonce)
-  | None => false
-  end.
+  sender_nonce fixture =? fixture.(transaction).(Transaction.nonce).
 
 Definition transaction_priority_fee_valid (fixture : t) : bool :=
   match fixture.(transaction).(Transaction.kind) with
@@ -658,7 +649,7 @@ Definition transaction_has_enough_balance (fixture : t) : bool :=
   let pre_state := pre_transaction_state fixture in
   let transaction := fixture.(transaction) in
   match Dict.get pre_state.(State.accounts) transaction.(Transaction.caller) with
-  | None => false
+  | None => transaction_upfront_cost fixture =? 0
   | Some sender =>
     transaction_upfront_cost fixture <=? sender.(Account.balance)
   end.
@@ -705,7 +696,7 @@ Definition state_after_value_transfer (fixture : t) : option State.t :=
       if fixture.(transaction).(Transaction.is_create) then
         prepare_created_account fixture gas_state.(State.accounts)
       else
-        transfer_transaction_value
+        transfer_transaction_value fixture.(protocol)
           gas_state.(State.accounts)
           fixture.(transaction) in
     match accounts with
@@ -825,32 +816,7 @@ Definition deploy_created_code
     (fixture : t)
     (code : list Z)
     (state : State.t) : option State.t :=
-  if andb
-      (Gas.has_code_size_limit fixture.(protocol))
-      (Z.of_nat (List.length code) >? Gas.max_code_size) then
-    None
-  else if andb
-      (Gas.rejects_ef_prefix fixture.(protocol))
-      match code with
-      | 239 :: _ => true
-      | _ => false
-      end then
-    None
-  else match Gas.charge (Gas.code_deposit_cost code) state with
-  | None => None
-  | Some state =>
-    match Dict.assign_function
-        state.(State.accounts)
-        (created_address fixture)
-        (fun account =>
-          account
-            <| Account.code := 0 |>
-            <| Account.codedata := code |>
-        ) with
-    | None => None
-    | Some accounts => Some (state <| State.accounts := accounts |>)
-    end
-  end.
+  Semantics.deploy_created_code fixture.(protocol) (created_address fixture) code state.
 
 Definition rollback_top_level_exception
     (fixture : t)
@@ -883,8 +849,7 @@ Definition rollback_top_level_contract_creation
       finalize_successful_transaction fixture
         (rollback_persistent_state before after))
   | (Step.Halt (Halt.Return offset size), after) =>
-    let deployed_code := Memory.get_bytes after.(State.memory) offset size in
-    match deploy_created_code fixture deployed_code after with
+    match deploy_returned_code fixture.(protocol) (created_address fixture) offset size after with
     | Some after =>
       (Step.Halt (Halt.Return offset size),
         finalize_successful_transaction fixture after)
@@ -908,7 +873,7 @@ Definition run_top_level_precompile
       (Step.Error "precompile not available", before)
   | Some cost =>
     if cost <=? before.(State.gas) then
-      match Stdlib.precompile_run_result transaction.(Transaction.to) input with
+      match Stdlib.precompile_run_for_protocol fixture.(protocol) transaction.(Transaction.to) input with
       | Some (Stdlib.PrecompileSuccess output) =>
         (
           Step.Halt Halt.Stop,
@@ -946,7 +911,7 @@ Definition transaction_targets_available_precompile (fixture : t) : bool :=
     end.
 
 Definition run (fixture : t) : Step.t * State.t :=
-  if negb (transaction_sender_exists fixture) then
+  if negb (transaction_sender_exists fixture) && (0 <? transaction_upfront_cost fixture) then
     (Step.Error "invalid transaction: sender account not found",
       pre_transaction_state fixture)
   else if negb (transaction_kind_supported fixture) then
@@ -982,6 +947,9 @@ Definition run (fixture : t) : Step.t * State.t :=
   else if negb (transaction_init_code_size_valid fixture) then
     (Step.Error "invalid transaction: init code size exceeds maximum",
       pre_transaction_state fixture)
+  else if Protocol.has_osaka_opcodes fixture.(protocol) &&
+          (fixture.(transaction).(Transaction.gas_limit) >? 2 ^ 24) then
+    (Step.Error "invalid transaction: gas limit exceeds protocol cap", pre_transaction_state fixture)
   else if negb (transaction_has_enough_gas fixture) then
     (Step.Error "invalid transaction: gas limit below transaction minimum",
       pre_transaction_state fixture)
@@ -1018,7 +986,7 @@ Definition run (fixture : t) : Step.t * State.t :=
         rollback_top_level_contract_creation fixture rollback_base result
       end
     else
-      match transfer_transaction_value
+      match transfer_transaction_value fixture.(protocol)
           rollback_base.(State.accounts)
           fixture.(transaction) with
       | None =>
