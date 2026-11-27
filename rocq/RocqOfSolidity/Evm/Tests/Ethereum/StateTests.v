@@ -3,7 +3,8 @@ Require Import RocqOfSolidity.simulations.RocqOfSolidity.
 Require Import RocqOfSolidity.Evm.Semantics.
 Require Import RocqOfSolidity.Evm.Tests.Ethereum.Fixture.
 
-Definition test_contract : U256.t := 16.
+(* Osaka reserves low addresses for native precompiles. *)
+Definition test_contract : U256.t := 0x10000.
 Definition test_sender : U256.t := 32.
 Definition test_beneficiary : U256.t := 48.
 
