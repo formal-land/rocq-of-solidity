@@ -61,5 +61,15 @@
       [29721, 29742],
       [29757, 29802]
     ]
+  },
+  "GeneratedOsaka": {
+    "paths": [
+      "*/eip_mainnet/*.json",
+      "eip7594_peerdas/max_blob_per_tx/*.json",
+      "eip7951_p256verify_precompiles/p256verify/modular_comparison.json",
+      "eip7951_p256verify_precompiles/p256verify/precompile_as_tx_entry_point.json",
+      "eip7951_p256verify_precompiles/p256verify/call_types.json"
+    ],
+    "sha256": "ceaa98f219a13d2bff01642295f6765568c96b343053d7d16a5b53b1f385cd57"
   }
 }

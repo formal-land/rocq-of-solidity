@@ -102,13 +102,16 @@ Run these fixture targets from `rocq/RocqOfSolidity/` under `opam exec`.
 | --- | --- |
 | `make evm-fixtures-smoke` | Six allowlisted cases used in pull requests |
 | `make evm-fixtures-full` | All 39,476 cases in the imported manifest |
+| `make evm-fixtures-osaka` | 32 official Osaka state tests from execution-specs tests@v21.0.0 |
 | `make evm-fixtures-probes` | 280 precompile probes and 606 static-call probes, with their original assertions |
 
-The targets download and verify the EEST v5.4.0 stable archive, or use a local
-copy supplied through `EEST_ARCHIVE`. Generated modules and per-case JSONL
+The main, smoke and probe targets use the EEST v5.4.0 stable archive. The
+Osaka target checks the transaction gas and blob limits, MODEXP pricing and
+operand sizes, CLZ, and P-256 signatures against the tests@v21.0.0 archive.
+Each target verifies its download or a local copy supplied through `EEST_ARCHIVE`. Generated modules and per-case JSONL
 results are in `build/evm-fixtures/`. Rerunning a target resumes successful
-proofs. Each compiler process has a 6 GiB address-space limit and a 15-minute
-timeout. The default is one worker. Set `EVM_FIXTURE_JOBS` to increase parallelism
+proofs. Each compiler process has a 6 GiB address-space limit, up to 128 MiB of stack,
+and a 15-minute timeout. The default is one worker. Set `EVM_FIXTURE_JOBS` to increase parallelism
 when sufficient memory is available. Manually running the **Rocq** workflow
 checks the full suite in 32 shards.
 

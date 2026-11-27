@@ -232,6 +232,18 @@ class EvmTestsGenerateTest(unittest.TestCase):
     def test_blob_base_fee_at_zero_excess(self):
         self.assertEqual(GENERATOR.blob_base_fee({"currentExcessBlobGas": "0x00"}), 1)
 
+    def test_prague_and_osaka_blob_price_fraction(self):
+        env = {"currentExcessBlobGas": hex(10_000_000)}
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Cancun"), 19)
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Prague"), 7)
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 7)
+
+    def test_osaka_transaction_limit_exception(self):
+        self.assertEqual(
+            GENERATOR.modeled_expected_error("TransactionException.GAS_LIMIT_EXCEEDS_MAXIMUM"),
+            "invalid transaction: gas limit exceeds protocol cap",
+        )
+
     def test_eip1559_effective_gas_price(self):
         transaction = {
             "maxFeePerGas": "0x0a",

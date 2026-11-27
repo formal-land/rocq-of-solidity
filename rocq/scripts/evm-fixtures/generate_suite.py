@@ -32,11 +32,28 @@ def selected_cases(root, ranges, include_nested_budget):
                     index += 1
 
 
+def osaka_cases(root, patterns):
+    directory = root / "fixtures/state_tests/for_osaka/osaka"
+    for pattern in patterns:
+        paths = sorted(directory.glob(pattern))
+        if not paths:
+            raise ValueError(f"missing Osaka fixture group {pattern}")
+        for path in paths:
+            file = gen.fixture_relative_path(root, path)
+            for test, fixture in gen.read_json(path).items():
+                for post in range(len(fixture["post"]["Osaka"])):
+                    entry = dict(id=gen.discovered_identifier(file, test, "Osaka", post),
+                                 file=file, test=test, fork="Osaka", post_index=post)
+                    yield gen.build_case_from_fixture(1000, entry, fixture)
+
+
 def generate(root, out, name, smoke=False):
     suite = SUITES[name]
     if smoke:
         allowlist = gen.read_json(gen.DEFAULT_ALLOWLIST)
         cases = (gen.build_case(root, allowlist["default_steps"], e) for e in allowlist["cases"])
+    elif name == "GeneratedOsaka":
+        cases = osaka_cases(root, suite["paths"])
     else:
         cases = selected_cases(root, suite["ranges"], name == "GeneratedStStaticProbeNew")
     template_path = HERE / (name + ".v.in")

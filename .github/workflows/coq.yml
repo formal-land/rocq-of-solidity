@@ -61,6 +61,26 @@ jobs:
             fi
             cd ../..
           endGroup
+    - name: Report fixture results
+      if: always()
+      shell: python
+      run: |
+        import json
+        import os
+        from collections import Counter
+        from pathlib import Path
+
+        for report in Path("build/evm-fixtures").glob("*/*.jsonl"):
+            cases = [json.loads(line) for line in report.read_text().splitlines()]
+            counts = Counter(case["status"] for case in cases)
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                print(f"### {report.stem}\n", file=summary)
+                print(f"{counts['passed']} passed, {counts['failed']} failed, "
+                      f"{counts['timeout']} timed out.\n", file=summary)
+                for case in cases:
+                    if case["status"] != "passed":
+                        print(f"- {case['status']} `{case['case']}`", file=summary)
+                        print(f"::error::{case['status']} {case['case']}")
     - uses: actions/upload-artifact@v7
       if: always()
       with:

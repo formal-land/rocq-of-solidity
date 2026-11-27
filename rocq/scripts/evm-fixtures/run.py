@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import resource
 import shutil
 import subprocess
 import sys
@@ -21,30 +22,36 @@ BUILD = gen.REPO_ROOT / "build" / "evm-fixtures"
 PROBES = ("GeneratedStPre2Probe", "GeneratedStStaticProbeNew")
 
 
-def extract_fixtures(destination):
+OSAKA_URL = "https://github.com/ethereum/execution-specs/releases/download/tests%40v21.0.0/fixtures.tar.gz"
+OSAKA_SHA256 = "dd642a261ac63f910b85c47d2549d2bb3ae4ad044fb5e852657f783441483bb2"
+
+
+def extract_fixtures(destination, osaka=False):
+    url, digest = (OSAKA_URL, OSAKA_SHA256) if osaka else (URL, SHA256)
+    prefix = ("fixtures", "state_tests", "for_osaka", "osaka") if osaka else ("fixtures", "state_tests")
     supplied = os.environ.get("EEST_ARCHIVE")
     cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    archive = Path(supplied) if supplied else cache / "rocq-of-solidity" / SHA256
+    archive = Path(supplied) if supplied else cache / "rocq-of-solidity" / digest
     if not supplied:
         archive.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=destination) as tmp:
         download = Path(tmp) / "download"
         source = archive
         if not supplied and not archive.exists():
-            with urllib.request.urlopen(URL, timeout=120) as response, download.open("wb") as out:
+            with urllib.request.urlopen(url, timeout=120) as response, download.open("wb") as out:
                 shutil.copyfileobj(response, out)
             source = download
         with source.open("rb") as inp:
             checksum = hashlib.sha256()
             for chunk in iter(lambda: inp.read(1 << 20), b""):
                 checksum.update(chunk)
-            if checksum.hexdigest() != SHA256:
+            if checksum.hexdigest() != digest:
                 raise ValueError(f"incorrect SHA-256 for {source}")
             inp.seek(0)
             with tarfile.open(fileobj=inp, mode="r|gz") as tar:
                 for member in tar:
                     path = Path(member.name)
-                    if (path.parts[:2] == ("fixtures", "state_tests") and
+                    if (path.parts[:len(prefix)] == prefix and
                             ".." not in path.parts and path.suffix == ".json" and member.isfile()):
                         target = destination / path
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +67,13 @@ def extract_fixtures(destination):
 def compile_suite(root, name, files, jobs, shard, shards):
     out = root / name
     namespace = "RocqOfSolidity.Evm.Tests.Ethereum"
-    command = ["prlimit", "--as=6442450944", "--", "coqc", "-q",
+    # Checking the final proof term for multiple 24 KiB deployed contracts
+    # can exceed the default 8 MiB native stack during Qed.
+    hard_stack = resource.getrlimit(resource.RLIMIT_STACK)[1]
+    stack = 128 << 20
+    if hard_stack != resource.RLIM_INFINITY:
+        stack = min(stack, hard_stack)
+    command = ["prlimit", "--as=6442450944", f"--stack={stack}:", "--", "coqc", "-q",
                "-R", str(gen.ROCQ_ROOT), "RocqOfSolidity",
                "-Q", str(out), namespace + "." + name,
                "-impredicative-set", "-w", "-stdlib-vector"]
@@ -111,7 +124,7 @@ def compile_suite(root, name, files, jobs, shard, shards):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("smoke", "full", "probes"))
+    parser.add_argument("mode", choices=("smoke", "full", "probes", "osaka"))
     args = parser.parse_args()
     jobs = int(os.environ.get("EVM_FIXTURE_JOBS", 1))
     shard = int(os.environ.get("EVM_FIXTURE_SHARD", 0))
@@ -123,9 +136,10 @@ def main():
     with (root / ".lock").open("a") as lock, tempfile.TemporaryDirectory(dir=root) as tmp:
         fcntl.flock(lock, fcntl.LOCK_EX)
         fixtures = Path(tmp)
-        extract_fixtures(fixtures)
+        extract_fixtures(fixtures, osaka=args.mode == "osaka")
         failed = 0
-        for name in PROBES if args.mode == "probes" else ("Generated",):
+        suites = {"probes": PROBES, "osaka": ("GeneratedOsaka",)}.get(args.mode, ("Generated",))
+        for name in suites:
             files = generate(fixtures, root / name, name, args.mode == "smoke")
             failed += compile_suite(root, name, files, jobs, shard, shards)
     return int(bool(failed))

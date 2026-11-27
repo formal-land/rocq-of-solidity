@@ -57,8 +57,6 @@ UNSUPPORTED_DIRECT_CALL_FIXTURE_PATTERNS = (
     "blake2",
     "eip152",
     "eip2537",
-    "eip4844_blobs/test_call_opcode_types",
-    "eip4844_blobs/test_external_vectors",
     "eip7883",
     "modexp",
     "precompile",
@@ -74,6 +72,7 @@ UNSUPPORTED_DIRECT_CALL_FIXTURE_PATTERNS = (
 
 SUPPORTED_DIRECT_CALL_FIXTURE_PATTERNS = (
     "blake2",
+    "eip7951_p256verify",
     "frontier/precompiles",
     "identity_precompile",
     "modexp",
@@ -237,8 +236,10 @@ def fake_exponential(factor: int, numerator: int, denominator: int) -> int:
     return output // denominator
 
 
-def blob_base_fee(env: dict[str, Any]) -> int:
-    return fake_exponential(1, parse_hex_int(env.get("currentExcessBlobGas", "0x00")), 3338477)
+def blob_base_fee(env: dict[str, Any], fork: str = "Cancun") -> int:
+    # The state-test environment supplies the current block's excess blob gas.
+    fraction = 5007716 if fork in {"Prague", "Osaka"} else 3338477
+    return fake_exponential(1, parse_hex_int(env.get("currentExcessBlobGas", "0x00")), fraction)
 
 
 def transaction_gas_price(transaction: dict[str, Any], env: dict[str, Any]) -> int:
@@ -288,6 +289,8 @@ def modeled_expected_error(expect_exception: str) -> str | None:
         "TransactionException.TYPE_2_TX_PRE_FORK",
         "TransactionException.TYPE_3_TX_PRE_FORK",
     }
+    if reasons == {"TransactionException.GAS_LIMIT_EXCEEDS_MAXIMUM"}:
+        return "invalid transaction: gas limit exceeds protocol cap"
     if reasons & unsupported_type_reasons:
         return "invalid transaction: transaction type not supported by protocol"
     if reasons == {"TransactionException.SENDER_NOT_EOA"}:
@@ -300,7 +303,7 @@ def modeled_expected_error(expect_exception: str) -> str | None:
         return "invalid transaction: blob transaction cannot create contract"
     if reasons == {"TransactionException.TYPE_3_TX_ZERO_BLOBS"}:
         return "invalid transaction: blob transaction has no blobs"
-    if reasons == {
+    if "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" in reasons and reasons <= {
         "TransactionException.TYPE_3_TX_MAX_BLOB_GAS_ALLOWANCE_EXCEEDED",
         "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED",
     }:
@@ -806,7 +809,7 @@ def build_case_from_fixture(
         block_difficulty=parse_hex_int(env.get("currentDifficulty", "0x00")),
         block_random=parse_hex_int(env.get("currentRandom", env.get("currentDifficulty", "0x00"))),
         block_base_fee=parse_hex_int(env.get("currentBaseFee", "0x00")),
-        block_blob_base_fee=blob_base_fee(env),
+        block_blob_base_fee=blob_base_fee(env, "Cancun" if pinned_case else fork),
         blob_hashes=transaction_blob_hashes(transaction),
         transaction_kind=transaction_kind_constructor(transaction),
         nonce=parse_hex_int(transaction.get("nonce", "0x00")),
