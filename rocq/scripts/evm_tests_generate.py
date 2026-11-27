@@ -237,9 +237,22 @@ def fake_exponential(factor: int, numerator: int, denominator: int) -> int:
 
 
 def blob_base_fee(env: dict[str, Any], fork: str = "Cancun") -> int:
-    # The state-test environment supplies the current block's excess blob gas.
     fraction = 5007716 if fork in {"Prague", "Osaka"} else 3338477
-    return fake_exponential(1, parse_hex_int(env.get("currentExcessBlobGas", "0x00")), fraction)
+    if "currentExcessBlobGas" in env:
+        excess = parse_hex_int(env["currentExcessBlobGas"])
+    else:
+        gas_per_blob = 1 << 17
+        target = 6 if fork in {"Prague", "Osaka"} else 3
+        parent_excess = parse_hex_int(env.get("parentExcessBlobGas", "0x0"))
+        used = parse_hex_int(env.get("parentBlobGasUsed", "0x0"))
+        excess = parent_excess + used - target * gas_per_blob
+        if fork == "Osaka" and excess >= 0:
+            # EIP-7918 uses the child schedule for the parent's blob price.
+            parent_price = fake_exponential(1, parent_excess, fraction)
+            base_fee = parse_hex_int(env.get("parentBaseFee", "0x0"))
+            if 8192 * base_fee > gas_per_blob * parent_price:
+                excess = parent_excess + used * (9 - target) // 9
+    return fake_exponential(1, max(0, excess), fraction)
 
 
 def transaction_gas_price(transaction: dict[str, Any], env: dict[str, Any]) -> int:
@@ -809,7 +822,11 @@ def build_case_from_fixture(
         block_difficulty=parse_hex_int(env.get("currentDifficulty", "0x00")),
         block_random=parse_hex_int(env.get("currentRandom", env.get("currentDifficulty", "0x00"))),
         block_base_fee=parse_hex_int(env.get("currentBaseFee", "0x00")),
-        block_blob_base_fee=blob_base_fee(env, "Cancun" if pinned_case else fork),
+        # The archived fork snapshot used Cancun pricing for all fixtures.
+        block_blob_base_fee=(
+            fake_exponential(1, parse_hex_int(env.get("currentExcessBlobGas", "0x0")), 3338477)
+            if pinned_case else blob_base_fee(env, fork)
+        ),
         blob_hashes=transaction_blob_hashes(transaction),
         transaction_kind=transaction_kind_constructor(transaction),
         nonce=parse_hex_int(transaction.get("nonce", "0x00")),

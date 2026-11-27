@@ -238,6 +238,26 @@ class EvmTestsGenerateTest(unittest.TestCase):
         self.assertEqual(GENERATOR.blob_base_fee(env, "Prague"), 7)
         self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 7)
 
+    def test_osaka_blob_price_from_parent(self):
+        env = {"parentExcessBlobGas": hex(10_000_000), "parentBlobGasUsed": "0x0"}
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 6)
+        env["parentBaseFee"] = hex(16 * 7)
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 6)
+        env["parentBaseFee"] = hex(16 * 7 + 1)
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 7)
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Prague"), 6)
+        env["currentExcessBlobGas"] = "0x0"
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 1)
+
+    def test_osaka_blob_price_with_parent_at_target(self):
+        env = {
+            "parentExcessBlobGas": hex(11_000_000),
+            "parentBlobGasUsed": hex(6 * 131072),
+            "parentBaseFee": "0x100",
+        }
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 9)
+        self.assertEqual(GENERATOR.blob_base_fee(env, "Prague"), 8)
+
     def test_osaka_transaction_limit_exception(self):
         self.assertEqual(
             GENERATOR.modeled_expected_error("TransactionException.GAS_LIMIT_EXCEEDS_MAXIMUM"),

@@ -108,6 +108,8 @@ Run these fixture targets from `rocq/RocqOfSolidity/` under `opam exec`.
 The main, smoke and probe targets use the EEST v5.4.0 stable archive. The
 Osaka target checks the transaction gas and blob limits, MODEXP pricing and
 operand sizes, CLZ, and P-256 signatures against the tests@v21.0.0 archive.
+For new Osaka state tests, the generator reads the current excess blob gas
+or derives it from parent-header fields using the EIP-7918 reserve price.
 Each target verifies its download or a local copy supplied through `EEST_ARCHIVE`. Generated modules and per-case JSONL
 results are in `build/evm-fixtures/`. Rerunning a target resumes successful
 proofs. Each compiler process has a 6 GiB address-space limit, up to 128 MiB of stack,
