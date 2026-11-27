@@ -1,0 +1,38 @@
+Definition expected_accounts_after :
+    list (U256.t * option (U256.t * Z * list Z)) :=
+  $accounts.
+
+Definition observed_accounts_after (result : Step.t * State.t) :
+    list (U256.t * option (U256.t * Z * list Z)) :=
+  List.map
+    (fun '(address, _) =>
+      (address, Fixture.account_fields_after result address))
+    expected_accounts_after.
+
+Definition expected_storage_after : list (U256.t * U256.t * option U256.t) :=
+  $storage.
+
+Definition observed_storage_after (result : Step.t * State.t) :
+    list (U256.t * U256.t * option U256.t) :=
+  List.map
+    (fun '(address, slot, _) =>
+      (address, slot, Fixture.storage_after result address slot))
+    expected_storage_after.
+
+Definition expected_after :
+    option string *
+    list (U256.t * option (U256.t * Z * list Z)) *
+    list (U256.t * U256.t * option U256.t) :=
+  (expected_error_after, expected_accounts_after, expected_storage_after).
+
+Definition observed_after (result : Step.t * State.t) :
+    option string *
+    list (U256.t * option (U256.t * Z * list Z)) *
+    list (U256.t * U256.t * option U256.t) :=
+  (Fixture.error_after result,
+    observed_accounts_after result,
+    observed_storage_after result).
+
+Example test_${case_id}_post :
+  observed_after result = expected_after.
+Proof. vm_compute. reflexivity. Qed.

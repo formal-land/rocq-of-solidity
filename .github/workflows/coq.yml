@@ -1,6 +1,7 @@
 name: Rocq
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "develop" ]
   pull_request:
@@ -13,9 +14,18 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]' || '[0]') }}
 
     steps:
     - uses: actions/checkout@v3
+    - uses: actions/cache@v4
+      with:
+        path: .cache/rocq-of-solidity
+        key: eest-stable-92cf1b47ad12fb27163261fc3c1cea5df72439cab507983d06b56c94f8741909
     - name: Download Git submodules
       run: git submodule update --init --recursive
     - uses: coq-community/docker-coq-action@v1
@@ -44,8 +54,23 @@ jobs:
           startGroup "Check that the diff is empty (excluding submodules)"
             git -c color.ui=always diff --exit-code --ignore-submodules=dirty
           endGroup
+          export XDG_CACHE_HOME="$PWD/.cache"
           startGroup "Compile Coq project"
             cd rocq/RocqOfSolidity
             make
+            python3 ../scripts/evm_tests_generate_test.py
+            if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+              EVM_FIXTURE_SHARD=${{ matrix.shard }} EVM_FIXTURE_SHARDS=32 make evm-fixtures-full
+            else
+              make evm-fixtures-smoke
+            fi
             cd ../..
           endGroup
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: evm-fixture-results-${{ matrix.shard }}
+        path: |
+          build/evm-fixtures/*/*.jsonl
+          build/evm-fixtures/*/*/*.log
+        if-no-files-found: ignore

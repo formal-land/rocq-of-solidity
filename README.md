@@ -89,30 +89,34 @@ To build the tests, you need to:
 
 We do not support yet all the semantic tests but around 90% and are working on the remaining ones.
 
-### Run all Rocq tests
+### Run the Rocq tests
 
-To run the solc-derived Rocq tests from the repository root:
+With the opam dependencies installed, `make -C rocq/RocqOfSolidity` builds the
+project, the handwritten EVM tests, and the Midnight proofs offline. From
+`rocq/`, run `opam exec -- python3 scripts/tests_compile.py` to check the
+Solidity-derived tests.
 
-```sh
-cd rocq
-opam exec -- python scripts/tests_compile.py -j 8
-```
+Run these fixture targets from `rocq/RocqOfSolidity/` under `opam exec`.
 
-This command uses `rocq/scripts/tests_blacklist.txt` for unsupported generated
-solc tests.
+| Target | Ethereum cases |
+| --- | --- |
+| `make evm-fixtures-smoke` | Six allowlisted cases used in pull requests |
+| `make evm-fixtures-full` | All 39,476 cases in the imported manifest |
+| `make evm-fixtures-probes` | 280 precompile probes and 606 static-call probes, with their original assertions |
 
-To run the RocqOfSolidity and EVM tests, including generated Ethereum fixtures,
-from the repository root:
+The targets download and verify the EEST v5.4.0 stable archive, or use a local
+copy supplied through `EEST_ARCHIVE`. Generated modules and per-case JSONL
+results are in `build/evm-fixtures/`. Rerunning a target resumes successful
+proofs. Each compiler process has a 6 GiB address-space limit and a 15-minute
+timeout. The default is one worker. Set `EVM_FIXTURE_JOBS` to increase parallelism
+when sufficient memory is available. Manually running the **Rocq** workflow
+checks the full suite in 32 shards.
 
-```sh
-cd rocq/RocqOfSolidity
-bash -lc 'ulimit -v 6291456; opam exec -- make -j8 -k all'
-```
-
-This command uses `rocq/RocqOfSolidity/blacklist.txt`. The generated Ethereum
-fixtures can be CPU and memory intensive; use the bounded triage workflow in
-[`Verification.md`](rocq/RocqOfSolidity/Evm/Tests/Ethereum/Verification.md) for
-fixture timeouts, memory-cap failures, or semantic mismatches.
+The pinned suite definitions use inclusive case ranges in the archive’s
+sorted JSON path order, then each JSON object's original test, fork, and post
+order. Each suite SHA-256 covers its case filenames and contents in sorted
+filename order. These values come from the fixture trees at fork commit
+`40651b12f8`. The probe manifests import their own modules.
 
 ## 📚 Example
 

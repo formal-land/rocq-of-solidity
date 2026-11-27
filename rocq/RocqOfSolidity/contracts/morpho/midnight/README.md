@@ -25,6 +25,11 @@ Interface-only source files are compilation dependencies. At this commit, `solc`
 emits `null` Yul AST objects for those interfaces, so there is no corresponding
 `shallow.v` for them.
 
+The Solidity snapshot under `core/midnight/solidity-src` matches the pinned
+submodule’s `src` directory. Its license texts are in
+[`deps/midnight/LICENSE`](../../../../../deps/midnight/LICENSE) and
+[`deps/midnight/LICENSE-SECONDARY`](../../../../../deps/midnight/LICENSE-SECONDARY).
+
 ## Reproduction
 
 From the repository root:
@@ -41,5 +46,6 @@ jq 'walk(if type == "object" then del(.nativeSrc, .src, .type) else . end)' \
 python3 rocq/scripts/shallow_embed.py contract.json > shallow.v
 ```
 
-The generated Rocq files are extraction/type-checking groundwork only. The
-functional specification is intentionally not included yet.
+The core functional specification is in `core/midnight/functional_spec.v`.
+The corresponding proofs are in `functional_equivalence.v` and the
+`solidity_equivalence_*.v` files alongside it.

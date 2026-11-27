@@ -17,6 +17,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from string import Template
 from typing import Any
 
 
@@ -665,6 +666,9 @@ def build_case_from_fixture(
     default_steps: int,
     entry: dict[str, Any],
     fixture: dict[str, Any],
+    *,
+    pinned_case: bool = False,
+    include_nested_budget: bool = True,
 ) -> GeneratedCase:
     case_id = sanitize_identifier(entry["id"])
     fixture_file = entry["file"]
@@ -675,7 +679,7 @@ def build_case_from_fixture(
         fixture_file,
         test_name,
     )
-    if performance_limited_reason is not None:
+    if performance_limited_reason is not None and not pinned_case:
         raise FixtureError(performance_limited_reason)
     unsupported_direct_call_reason = unsupported_direct_call_fixture_reason(
         fixture_file,
@@ -728,8 +732,8 @@ def build_case_from_fixture(
                 else []
             )
         code_instruction_count = instruction_count(target_code)
-        loop_bound_hint = max_backward_loop_push_value(target_code)
-        if bytecode_contains_opcode(target_code, {0xF0, 0xF1, 0xF2, 0xF4, 0xF5, 0xFA}):
+        loop_bound_hint = max_backward_loop_push_value(target_code) if include_nested_budget else 0
+        if include_nested_budget and bytecode_contains_opcode(target_code, {0xF0, 0xF1, 0xF2, 0xF4, 0xF5, 0xFA}):
             code_instruction_count = max(
                 code_instruction_count,
                 max_pre_account_instruction_count(fixture["pre"]),
@@ -783,7 +787,7 @@ def build_case_from_fixture(
         loop_bound_hint,
         storage_assertion_count + len(account_assertions),
     )
-    if steps > MAX_ROCQ_EVALUATION_STEPS:
+    if steps > MAX_ROCQ_EVALUATION_STEPS and not pinned_case:
         raise FixtureError(ROCQ_EVALUATION_SPEED_SKIP_REASON)
 
     return GeneratedCase(
@@ -1086,7 +1090,8 @@ def rocq_alloc(address: int, account: dict[str, Any]) -> str:
     )
 
 
-def generate_case(case: GeneratedCase) -> str:
+def generate_case(case: GeneratedCase, proof_template: Template | None = None,
+                  check_success: bool = False) -> str:
     pre = ";\n".join(rocq_alloc(address, account) for address, account in case.pre)
     emitted_data = emitted_transaction_data(case)
     if case.is_create:
@@ -1135,42 +1140,58 @@ def generate_case(case: GeneratedCase) -> str:
         if case.expected_error is not None
         else []
     )
+    fixture_lines = [
+        "Require Import RocqOfSolidity.RocqOfSolidity.",
+        "Require Import RocqOfSolidity.simulations.RocqOfSolidity.",
+        "Require Import RocqOfSolidity.Evm.Semantics.",
+        "Require Import RocqOfSolidity.Evm.Tests.Ethereum.Fixture.",
+        "",
+        "(* Generated from official EEST state-test JSON.",
+        f"   Source: {case.file}",
+        f"   Test: {case.test_name}",
+        f"   Fork/post: {case.fork}[{case.post_index}]",
+        "   The assertions intentionally cover only effects modeled by Fixture.run. *)",
+        "",
+        "Definition fixture : Fixture.t := {|",
+        f"  Fixture.name := {rocq_string(case.fixture_name)};",
+        f"  Fixture.protocol := {case.protocol};",
+        "  Fixture.codes := [];",
+        "  Fixture.pre := [",
+        pre,
+        "  ];",
+        "  Fixture.block := Fixture.BlockEnv.make",
+        f"    {case.block_coinbase}",
+        f"    {case.block_gas_limit}",
+        f"    {case.block_number}",
+        f"    {case.block_timestamp}",
+        f"    {case.block_difficulty}",
+        f"    {case.block_random}",
+        f"    {case.block_base_fee}",
+        f"    {case.block_blob_base_fee}",
+        f"    {rocq_list(case.blob_hashes, indent='    ')};",
+        *transaction_lines,
+        f"  Fixture.steps := {case.steps};",
+        "|}.",
+        "",
+        "Definition result : Step.t * State.t := Fixture.run fixture.",
+        "",
+    ]
+    if proof_template is not None:
+        if check_success:
+            error_assertion = [
+                "Definition expected_error_after : option string :=",
+                f"  {rocq_string_option(case.expected_error)}.",
+                "",
+            ]
+        proof = proof_template.substitute(
+            case_id=case.case_id,
+            accounts=rocq_account_options(case.account_assertions),
+            storage=rocq_account_storage_options(case.account_assertions),
+        )
+        return "\n".join([*fixture_lines, *error_assertion, proof])
     return "\n".join(
         [
-            "Require Import RocqOfSolidity.RocqOfSolidity.",
-            "Require Import RocqOfSolidity.simulations.RocqOfSolidity.",
-            "Require Import RocqOfSolidity.Evm.Semantics.",
-            "Require Import RocqOfSolidity.Evm.Tests.Ethereum.Fixture.",
-            "",
-            "(* Generated from official EEST state-test JSON.",
-            f"   Source: {case.file}",
-            f"   Test: {case.test_name}",
-            f"   Fork/post: {case.fork}[{case.post_index}]",
-            "   The assertions intentionally cover only effects modeled by Fixture.run. *)",
-            "",
-            "Definition fixture : Fixture.t := {|",
-            f"  Fixture.name := {rocq_string(case.fixture_name)};",
-            f"  Fixture.protocol := {case.protocol};",
-            "  Fixture.codes := [];",
-            "  Fixture.pre := [",
-            pre,
-            "  ];",
-            "  Fixture.block := Fixture.BlockEnv.make",
-            f"    {case.block_coinbase}",
-            f"    {case.block_gas_limit}",
-            f"    {case.block_number}",
-            f"    {case.block_timestamp}",
-            f"    {case.block_difficulty}",
-            f"    {case.block_random}",
-            f"    {case.block_base_fee}",
-            f"    {case.block_blob_base_fee}",
-            f"    {rocq_list(case.blob_hashes, indent='    ')};",
-            *transaction_lines,
-            f"  Fixture.steps := {case.steps};",
-            "|}.",
-            "",
-            "Definition result : Step.t * State.t := Fixture.run fixture.",
-            "",
+            *fixture_lines,
             *error_assertion,
             "Definition expected_accounts_after :",
             "    list (U256.t * option (U256.t * Z * list Z)) :=",

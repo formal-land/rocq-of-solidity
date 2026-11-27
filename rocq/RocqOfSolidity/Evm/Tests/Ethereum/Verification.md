@@ -1,5 +1,7 @@
 # Ethereum Fixture Verification Notes
 
+The reproducible upstream commands are in the [project README](../../../../../README.md#run-the-rocq-tests). The following notes record experiments on the source branch. Its generated paths, intermediate counts, and local build commands refer to those snapshots.
+
 This file records the low-memory verification approach for generated EEST
 fixtures. Use it when resuming the all-protocol fixture goal.
 

@@ -9,3 +9,5 @@ RocqMakefile.conf
 *.vos
 *.glob
 .*.aux
+
+/RocqOfSolidity/Evm/Tests/Ethereum/Generated/
