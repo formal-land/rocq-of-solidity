@@ -3,7 +3,7 @@ name: Rocq
 on:
   workflow_dispatch:
   push:
-    branches: [ "develop" ]
+    branches: [ "develop", "ci/verify-authorization-kernel-49ef3d7" ]
   pull_request:
     branches: [ "develop" ]
 
@@ -63,6 +63,9 @@ jobs:
               EVM_FIXTURE_SHARD=${{ matrix.shard }} EVM_FIXTURE_SHARDS=32 make evm-fixtures-full evm-fixtures-probes
             else
               make evm-fixtures-smoke
+              export EVM_FIXTURE_JOBS=2
+              make evm-fixtures-osaka evm-fixtures-probes-archive
+              EVM_FIXTURE_SHARD=0 EVM_FIXTURE_SHARDS=32 make evm-fixtures-full evm-fixtures-probes
             fi
             cd ../..
           endGroup
