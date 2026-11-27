@@ -13,7 +13,7 @@ env:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -28,28 +28,20 @@ jobs:
         key: eest-stable-92cf1b47ad12fb27163261fc3c1cea5df72439cab507983d06b56c94f8741909
     - name: Download Git submodules
       run: git submodule update --init --recursive
+    - name: Compile the Solidity test emitter
+      if: matrix.shard == 0
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake libboost-filesystem-dev libboost-program-options-dev libboost-test-dev
+        cmake -S . -B build/solidity-emitter -DCMAKE_BUILD_TYPE=Release
+        make -C build/solidity-emitter/test libsolidity/SemanticTest.cpp.o
     - uses: coq-community/docker-coq-action@v1
       with:
         custom_image: coqorg/coq:8.20-ocaml-4.14-flambda
         custom_script: |
           startGroup "Install dependencies"
-            sudo apt-get update
-            sudo apt-get install -y cmake libboost-all-dev jq
-            sudo ln -s `which python3` /usr/bin/python
-            opam install -y --deps-only rocq/RocqOfSolidity/rocq-of-solidity.opam
-          endGroup
-          startGroup "Build"
             sudo chown -R $(whoami) .
-            mkdir build
-            cd build
-            cmake ..
-            # make
-            cd ..
-          endGroup
-          startGroup "Translate contracts"
-            # We cannot do it as we need to have solc compiled and it takes too long
-            cd rocq/
-            cd ..
+            opam install -y --deps-only rocq/RocqOfSolidity/rocq-of-solidity.opam
           endGroup
           startGroup "Check that the diff is empty (excluding submodules)"
             git -c color.ui=always diff --exit-code --ignore-submodules=dirty
