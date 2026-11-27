@@ -92,10 +92,6 @@ class FixtureError(Exception):
     pass
 
 
-class UnsupportedAuthorizationList(FixtureError):
-    pass
-
-
 @dataclass(frozen=True)
 class AccountAssertion:
     address: int
@@ -140,6 +136,7 @@ class GeneratedCase:
     steps: int
     account_assertions: list[AccountAssertion]
     expected_error: str | None
+    chain_id: int = 1
 
 
 def parse_args() -> argparse.Namespace:
@@ -285,6 +282,18 @@ def transaction_blob_gas_fee_cap(transaction: dict[str, Any]) -> int:
 
 
 def transaction_kind_constructor(transaction: dict[str, Any]) -> str:
+    if "authorizationList" in transaction:
+        entries = []
+        for auth in transaction["authorizationList"]:
+            address = parse_hex_bytes(auth["address"])
+            if len(address) != 20:
+                raise FixtureError("authorization address must contain exactly 20 bytes")
+            parity = auth["yParity"] if "yParity" in auth else auth["v"]
+            fields = [parse_hex_int(auth["chainId"]), int.from_bytes(bytes(address), "big"),
+                      parse_hex_int(auth["nonce"]), parse_hex_int(parity),
+                      parse_hex_int(auth["r"]), parse_hex_int(auth["s"])]
+            entries.append("Fixture.Authorization.make " + " ".join(map(str, fields)))
+        return "(Fixture.TransactionKind.SetCode [" + ";\n      ".join(entries) + "])"
     if "maxFeePerBlobGas" in transaction or "blobVersionedHashes" in transaction:
         return "Fixture.TransactionKind.Blob"
     if "maxFeePerGas" in transaction or "maxPriorityFeePerGas" in transaction:
@@ -305,7 +314,12 @@ def modeled_expected_error(expect_exception: str) -> str | None:
         "TransactionException.TYPE_1_TX_PRE_FORK",
         "TransactionException.TYPE_2_TX_PRE_FORK",
         "TransactionException.TYPE_3_TX_PRE_FORK",
+        "TransactionException.TYPE_4_TX_PRE_FORK",
     }
+    if reasons == {"TransactionException.TYPE_4_EMPTY_AUTHORIZATION_LIST"}:
+        return "invalid transaction: empty authorization list"
+    if reasons == {"TransactionException.TYPE_4_TX_CONTRACT_CREATION"}:
+        return "invalid transaction: set-code transaction cannot create contract"
     if reasons == {"TransactionException.GAS_LIMIT_EXCEEDS_MAXIMUM"}:
         return "invalid transaction: gas limit exceeds protocol cap"
     if reasons & unsupported_type_reasons:
@@ -693,8 +707,6 @@ def build_case_from_fixture(
 ) -> GeneratedCase:
     case_id = sanitize_identifier(entry["id"])
     fixture_file = entry["file"]
-    if "eip7702_set_code_tx" in fixture_file:
-        raise FixtureError("EIP-7702 set-code transaction fixtures are not generated in this pass")
     test_name = entry["test"]
     performance_limited_reason = performance_limited_fixture_reason(
         fixture_file,
@@ -729,10 +741,6 @@ def build_case_from_fixture(
         and optional_account_lookup(fixture["pre"], transaction["sender"]) is None
     ):
         expected_error = "invalid transaction: sender account not found"
-    if "authorizationList" in transaction:
-        raise UnsupportedAuthorizationList(
-            "EIP-7702 authorization-list transactions are not generated in this pass"
-        )
     to_raw = transaction["to"]
     is_create = to_raw == ""
     indexes = post["indexes"]
@@ -825,6 +833,7 @@ def build_case_from_fixture(
         post_index=post_index,
         fixture_name=f"{fixture_file}:{test_name}:{fork}[{post_index}]",
         pre=sorted_alloc(fixture["pre"]),
+        chain_id=parse_hex_int(fixture.get("config", {}).get("chainid", "0x1")),
         block_coinbase=hex_address_to_int(env["currentCoinbase"]),
         block_gas_limit=parse_hex_int(env["currentGasLimit"]),
         block_number=parse_hex_int(env["currentNumber"]),
@@ -1189,7 +1198,8 @@ def generate_case(case: GeneratedCase, proof_template: Template | None = None,
         "  Fixture.pre := [",
         pre,
         "  ];",
-        "  Fixture.block := Fixture.BlockEnv.make",
+        ("  Fixture.block := Fixture.BlockEnv.make" if case.chain_id == 1 else
+         f"  Fixture.block := Fixture.BlockEnv.make_on_chain {case.chain_id}"),
         f"    {case.block_coinbase}",
         f"    {case.block_gas_limit}",
         f"    {case.block_number}",

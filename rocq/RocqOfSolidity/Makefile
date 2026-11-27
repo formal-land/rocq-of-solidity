@@ -32,6 +32,6 @@ clean: clean-rocq
 
 distclean: clean
 
-.PHONY: evm-fixtures-smoke evm-fixtures-full evm-fixtures-probes evm-fixtures-osaka
-evm-fixtures-smoke evm-fixtures-full evm-fixtures-probes evm-fixtures-osaka: all
+.PHONY: evm-fixtures-smoke evm-fixtures-full evm-fixtures-probes evm-fixtures-probes-archive evm-fixtures-osaka
+evm-fixtures-smoke evm-fixtures-full evm-fixtures-probes evm-fixtures-probes-archive evm-fixtures-osaka: all
 	python3 ../scripts/evm-fixtures/run.py $(patsubst evm-fixtures-%,%,$@)

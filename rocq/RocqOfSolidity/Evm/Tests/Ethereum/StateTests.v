@@ -267,3 +267,50 @@ Example transaction_gas_cap_activates_at_osaka :
    Fixture.error_after (run (gas_cap_fixture Protocol.Osaka (2 ^ 24 + 1)))) =
   (None, None, Some "invalid transaction: gas limit exceeds protocol cap").
 Proof. vm_compute. reflexivity. Qed.
+
+(* Signed authorization from the Osaka CLZ release case. *)
+Definition clz_authorization := Fixture.Authorization.make 0
+  0xe9af3561eb2620366e37cefde74ee1aeb661c8b6 0 1
+  106284532706481893178988925271596517503237486390980301303768191011700271009315
+  12974728769464299424273162866275881835950535862921745812544177837947452393608.
+
+Definition authorization_signer : Z := 0xc0f6dc9e5836f54caadbf59cc69346c508e1992b.
+
+Definition delegated_transaction (protocol : Protocol.t)
+    (entries : list Fixture.Authorization.t) (code : list Z) : Fixture.t := {|
+  Fixture.name := "delegated transaction";
+  Fixture.protocol := protocol;
+  Fixture.codes := [];
+  Fixture.pre := [
+    Fixture.Alloc.make test_sender 1000 0 [] [];
+    Fixture.Alloc.make clz_authorization.(Fixture.Authorization.destination) 0 1 code [] ];
+  Fixture.block := default_block;
+  Fixture.transaction := Fixture.Transaction.make_kind_with_nonce_fee_caps_access_list
+    (Fixture.TransactionKind.SetCode entries) 0 test_sender authorization_signer
+    0 1000000 0 0 0 0 0 [] [];
+  Fixture.steps := 80
+|}.
+
+Example set_code_rejects_empty_list_and_pre_prague_type :
+  (Fixture.error_after (run (delegated_transaction Protocol.Prague [] [])),
+   Fixture.error_after (run (delegated_transaction Protocol.Cancun [clz_authorization] []))) =
+  (Some "invalid transaction: empty authorization list",
+   Some "invalid transaction: transaction type not supported by protocol").
+Proof. vm_compute. reflexivity. Qed.
+
+Example set_code_skips_invalid_signature_and_executes_in_authority_storage :
+  let invalid := Fixture.Authorization.make 0 1 0 0 0 0 in
+  let result := run (delegated_transaction Protocol.Prague [invalid; clz_authorization]
+    [96; 42; 96; 0; 85; 0]) in
+  Fixture.storage_after result authorization_signer 0 = Some 42.
+Proof. vm_compute. reflexivity. Qed.
+
+Example set_code_persists_across_revert :
+  let result := run (delegated_transaction Protocol.Osaka [clz_authorization]
+    [96; 42; 96; 0; 85; 96; 0; 96; 0; 253]) in
+  (Fixture.halt_after result,
+   Fixture.account_fields_after result authorization_signer,
+   Fixture.storage_after result authorization_signer 0) =
+  (Some (Halt.Revert 0 0), Some (0, 1, [239; 1; 0] ++
+    StdlibAux.low_160_bits_as_bytes clz_authorization.(Fixture.Authorization.destination)), Some 0).
+Proof. vm_compute. reflexivity. Qed.

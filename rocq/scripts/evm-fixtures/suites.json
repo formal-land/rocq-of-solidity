@@ -29,13 +29,27 @@
     ]
   },
   "GeneratedStPre2Probe": {
-    "sha256": "f2b89fd17226417546714d3b44f5bcccb0f96a8ea5bea2304e8a0bf91a8c0ae0",
+    "archive_sha256": "f2b89fd17226417546714d3b44f5bcccb0f96a8ea5bea2304e8a0bf91a8c0ae0",
+    "execution_errors": {
+      "static_state_tests_stprecompiledcontracts2_modexp_0_0_0_20500_modexp_0_0_0_20500_fork_cancun_sta_f22f1c1cf2": "out of gas",
+      "static_state_tests_stprecompiledcontracts2_modexp_0_0_0_20500_modexp_0_0_0_20500_fork_prague_sta_26c6f00a44": "out of gas",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_cancun_state_7cb41e6c8b": "out of gas: precompile",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_cancun_state_b3445af4f0": "out of gas: precompile",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_cancun_state_e825785adf": "out of gas: precompile",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_cancun_state_fbe1d3ea4b": "out of gas: precompile",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_prague_state_837c80b3b1": "out of gas: precompile",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_prague_state_a479e72dc0": "out of gas: precompile",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_prague_state_cc16ab8afb": "out of gas: precompile",
+      "static_state_tests_stprecompiledcontracts2_modexprandominput_modexprandominput_fork_prague_state_fcb8bc6a7e": "out of gas: precompile"
+    },
+    "sha256": "72534c9364627901ecba48d81ded8edd51b55acc566237968b4c9fac44d8eddd",
     "ranges": [
       [24499, 24778]
     ]
   },
   "GeneratedStStaticProbeNew": {
-    "sha256": "11c375c72c62154d1c6e6ed32ea821cc527d35087ff854f8f95aa77e33a570c8",
+    "archive_sha256": "11c375c72c62154d1c6e6ed32ea821cc527d35087ff854f8f95aa77e33a570c8",
+    "sha256": "0c35de646b0203d887f1b4f033c166252a3d77b0b7836d4303075d147b5726c1",
     "ranges": [
       [28853, 28880],
       [28889, 28900],
@@ -63,7 +77,6 @@
     ]
   },
   "GeneratedOsaka": {
-    "authorization_list_cases": 6,
-    "sha256": "485a412430c347f347b58253a03c37ed920aaaa9ab813cdb0ab2ff5e6bbb6943"
+    "sha256": "b94730f214aa2e166967863043f4dc5948f4aa77270bfccdb2cfdf169d98069b"
   }
 }

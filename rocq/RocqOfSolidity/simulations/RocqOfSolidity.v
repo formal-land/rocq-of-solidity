@@ -6,6 +6,7 @@ Require RocqOfSolidity.RocqEvm.Crypto.RIPEMD160.
 Require RocqOfSolidity.RocqEvm.Crypto.SHA256.
 Require RocqOfSolidity.RocqEvm.Crypto.KZG.
 Require RocqOfSolidity.RocqEvm.Crypto.P256.
+Require RocqOfSolidity.RocqEvm.Crypto.PrimeCurve.
 Require Import Coq.ZArith.Znumtheory.
 From Bignums Require Import BigN.BigN.
 
@@ -1738,44 +1739,25 @@ Module Stdlib.
 
   Definition secp256k1_recover_public_key
       (message_hash v r s : Z) : option secp256k1_point :=
-    if ((v =? 27) || (v =? 28)) &&
-        secp256k1_scalar r && secp256k1_scalar s then
-      let recovery_id := v - 27 in
-      let x := r in
-      if x <? secp256k1_field_modulus then
-        let alpha := secp256k1_mod (x * x * x + 7) in
-        let beta :=
-          pow_mod alpha ((secp256k1_field_modulus + 1) / 4)
-            secp256k1_field_modulus in
-        let y :=
-          if (beta mod 2 =? recovery_id) then
-            beta
-          else
-            secp256k1_field_modulus - beta in
-        let r_point := (x, y) in
-        if secp256k1_on_curve r_point then
-          match inv_mod secp256k1_group_order r with
-          | None => None
-          | Some r_inv =>
-            let message_hash := message_hash mod secp256k1_group_order in
-            let scalar1 := (s * r_inv) mod secp256k1_group_order in
-            let scalar2 := (- message_hash * r_inv) mod secp256k1_group_order in
-            match
-              secp256k1_mul_add
-                r_point scalar1
-                (secp256k1_gx, secp256k1_gy) scalar2
-            with
-            | Some public_key =>
-              if secp256k1_infinity public_key then None else Some public_key
-            | None => None
-            end
-          end
-        else
-          None
-      else
-        None
-    else
-      None.
+    if ((v =? 27) || (v =? 28)) && secp256k1_scalar r && secp256k1_scalar s then
+      let p := PrimeCurve.of_Z secp256k1_field_modulus in
+      let x := PrimeCurve.of_Z r in
+      let alpha := PrimeCurve.add p (PrimeCurve.mul p x (PrimeCurve.mul p x x))
+        (PrimeCurve.of_Z 7) in
+      let beta := PrimeCurve.power (PrimeCurve.mul p) alpha
+        (Z.to_pos ((secp256k1_field_modulus + 1) / 4)) in
+      let y := if BigN.to_Z beta mod 2 =? v - 27 then beta
+               else PrimeCurve.sub p PrimeCurve.zero beta in
+      if BigN.eqb (PrimeCurve.mul p y y) alpha then
+        let order := secp256k1_group_order in
+        let inverse := BigN.to_Z (PrimeCurve.inv (PrimeCurve.of_Z order) x) in
+        let generator := Some (PrimeCurve.of_Z secp256k1_gx, PrimeCurve.of_Z secp256k1_gy) in
+        let left := PrimeCurve.scale p PrimeCurve.zero (Some (x, y)) ((s * inverse) mod order) in
+        let right := PrimeCurve.scale p PrimeCurve.zero generator ((-message_hash * inverse) mod order) in
+        option_map (fun point => (BigN.to_Z (fst point), BigN.to_Z (snd point)))
+          (PrimeCurve.point_add p PrimeCurve.zero left right)
+      else None
+    else None.
 
   Definition ecrecover_word (input : list Z) (offset : U256.t) : U256.t :=
     Memory.bytes_as_u256

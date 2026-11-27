@@ -16,6 +16,17 @@ SPEC.loader.exec_module(GENERATOR)
 
 
 class EvmTestsGenerateTest(unittest.TestCase):
+    def test_authorization_uses_signature_fields(self):
+        auth = dict(chainId="0x0", address="0x" + "01" * 20, nonce="0x1",
+                    yParity="0x0", r="0x2", s="0x3", signer="ignored")
+        rendered = GENERATOR.transaction_kind_constructor({"authorizationList": [auth]})
+        address = int(auth["address"], 16)
+        self.assertEqual(rendered, f"(Fixture.TransactionKind.SetCode [Fixture.Authorization.make 0 {address} 1 0 2 3])")
+        self.assertEqual(GENERATOR.transaction_kind_constructor({"authorizationList": []}),
+                         "(Fixture.TransactionKind.SetCode [])")
+        with self.assertRaises(GENERATOR.FixtureError):
+            GENERATOR.transaction_kind_constructor({"authorizationList": [dict(auth, address="0x01")]})
+
     def test_parse_hex_int(self):
         self.assertEqual(GENERATOR.parse_hex_int("0x"), 0)
         self.assertEqual(GENERATOR.parse_hex_int("0x2a"), 42)

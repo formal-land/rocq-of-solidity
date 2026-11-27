@@ -1011,6 +1011,42 @@ Definition empty_call_account (balance : U256.t) : Account.t := {|
   Account.immutables := [];
 |}.
 
+(** EIP-7702 follows exactly one delegation when loading executable code.
+    Account inspection opcodes continue to use the stored code bytes. *)
+Definition delegation_target (protocol : Protocol.t) (account : Account.t) : option U256.t :=
+  if Gas.is_prague_or_later protocol && (account.(Account.code) =? 0) then
+    match account.(Account.codedata) with
+    | 239 :: 1 :: 0 :: target =>
+      if Nat.eqb (List.length target) 20 then Some (Memory.bytes_as_u256 target) else None
+    | _ => None
+    end
+  else None.
+
+Definition executable_account
+    (protocol : Protocol.t) (state : State.t) (account : Account.t) : Account.t :=
+  match delegation_target protocol account with
+  | None => account
+  | Some target =>
+    if u256_in target (Gas.precompile_addresses protocol) then empty_call_account 0
+    else match Dict.get state.(State.accounts) target with
+         | Some delegated => delegated
+         | None => empty_call_account 0
+         end
+  end.
+
+Definition delegation_access_cost
+    (protocol : Protocol.t) (callee : option Account.t) (state : State.t) : Z * State.t :=
+  match callee with
+  | Some account =>
+    match delegation_target protocol account with
+    | Some target =>
+      let '(warm, state) := Gas.warm_address target state in
+      (if warm then Gas.warm_storage_read else Gas.cold_account_access, state)
+    | None => (0, state)
+    end
+  | None => (0, state)
+  end.
+
 Definition credit_call_account
     (accounts : list (U256.t * Account.t))
     (address value : U256.t) : list (U256.t * Account.t) :=
@@ -2642,7 +2678,9 @@ Definition exec_instruction_with_runner
       else
         let callee_account := Dict.get state.(State.accounts) address in
         let '(warm, state) := Gas.warm_address address state in
-        let extra_cost :=
+        let '(delegation_cost, state) :=
+          delegation_access_cost environment.(Environment.protocol) callee_account state in
+        let extra_cost := delegation_cost +
           Gas.call_dynamic_cost
             environment.(Environment.protocol) warm value callee_account in
         match charge_two_memory_regions_and_extra
@@ -2709,6 +2747,7 @@ Definition exec_instruction_with_runner
                             (state <| State.return_data := ReturnData.empty |>))
                       end
                     | Some callee_account =>
+                      let callee_account := executable_account environment.(Environment.protocol) state callee_account in
                       let code_bytes := account_code_bytes callee_account in
                       if StdlibAux.bytes_eqb code_bytes [] then
                         match transfer_call_value
@@ -2786,7 +2825,9 @@ Definition exec_instruction_with_runner
       let address := StdlibAux.address_of_word address in
       let callee_account := Dict.get state.(State.accounts) address in
       let '(warm, state) := Gas.warm_address address state in
-      let extra_cost :=
+      let '(delegation_cost, state) :=
+        delegation_access_cost environment.(Environment.protocol) callee_account state in
+      let extra_cost := delegation_cost +
         Gas.call_dynamic_cost_without_new_account
           environment.(Environment.protocol) warm value in
       match charge_two_memory_regions_and_extra
@@ -2848,6 +2889,7 @@ Definition exec_instruction_with_runner
                       (return_unused_call_stipend value
                         (state <| State.return_data := ReturnData.empty |>))
                   | Some callee_account =>
+                    let callee_account := executable_account environment.(Environment.protocol) state callee_account in
                     let code_bytes := account_code_bytes callee_account in
                     if StdlibAux.bytes_eqb code_bytes [] then
                       write_call_output CALLCODE environment 1 [] out_offset out_size
@@ -2919,7 +2961,9 @@ Definition exec_instruction_with_runner
       let address := StdlibAux.address_of_word address in
       let callee_account := Dict.get state.(State.accounts) address in
       let '(warm, state) := Gas.warm_address address state in
-      let extra_cost :=
+      let '(delegation_cost, state) :=
+        delegation_access_cost environment.(Environment.protocol) callee_account state in
+      let extra_cost := delegation_cost +
         Gas.call_dynamic_cost_without_new_account
           environment.(Environment.protocol) warm 0 in
       match charge_two_memory_regions_and_extra
@@ -2967,6 +3011,7 @@ Definition exec_instruction_with_runner
                   (Frame.with_stack frame stack) stack
                   (state <| State.return_data := ReturnData.empty |>)
               | Some callee_account =>
+                let callee_account := executable_account environment.(Environment.protocol) state callee_account in
                 let code_bytes := account_code_bytes callee_account in
                 if StdlibAux.bytes_eqb code_bytes [] then
                   write_call_output DELEGATECALL environment 1 [] out_offset out_size
@@ -3032,7 +3077,9 @@ Definition exec_instruction_with_runner
       let address := StdlibAux.address_of_word address in
       let callee_account := Dict.get state.(State.accounts) address in
       let '(warm, state) := Gas.warm_address address state in
-      let extra_cost :=
+      let '(delegation_cost, state) :=
+        delegation_access_cost environment.(Environment.protocol) callee_account state in
+      let extra_cost := delegation_cost +
         Gas.call_dynamic_cost_without_new_account
           environment.(Environment.protocol) warm 0 in
       match charge_two_memory_regions_and_extra
@@ -3080,6 +3127,7 @@ Definition exec_instruction_with_runner
                   (Frame.with_stack frame stack) stack
                   (state <| State.return_data := ReturnData.empty |>)
               | Some callee_account =>
+                let callee_account := executable_account environment.(Environment.protocol) state callee_account in
                 let code_bytes := account_code_bytes callee_account in
                 if StdlibAux.bytes_eqb code_bytes [] then
                   write_call_output STATICCALL environment 1 [] out_offset out_size

@@ -38,6 +38,7 @@ End Alloc.
 
 Module BlockEnv.
   Record t : Set := {
+    chain_id : U256.t;
     coinbase : U256.t;
     gas_limit : U256.t;
     number : U256.t;
@@ -49,9 +50,10 @@ Module BlockEnv.
     blob_hashes : list U256.t;
   }.
 
-  Definition make
+  Definition make_on_chain (chain : U256.t)
       (coinbase gas_limit number timestamp difficulty random base_fee blob_base_fee : U256.t)
       (blob_hashes : list U256.t) : t := {|
+    chain_id := chain;
     coinbase := coinbase;
     gas_limit := gas_limit;
     number := number;
@@ -62,14 +64,50 @@ Module BlockEnv.
     blob_base_fee := blob_base_fee;
     blob_hashes := blob_hashes;
   |}.
+  Definition make := make_on_chain 1.
 End BlockEnv.
+
+Module Authorization.
+  Record t : Set := make {
+    chain_id : Z;
+    destination : Z;
+    nonce : Z;
+    parity : Z;
+    r : Z;
+    s : Z;
+  }.
+
+  Definition fits (bits value : Z) : bool := (0 <=? value) && (value <? 2 ^ bits).
+
+  Definition well_formed (a : t) : bool :=
+    fits 256 a.(chain_id) && fits 160 a.(destination) && fits 64 a.(nonce) &&
+    fits 8 a.(parity) && fits 256 a.(r) && fits 256 a.(s).
+
+  Definition signing_hash (a : t) : Z :=
+    let payload := StdlibAux.rlp_integer a.(chain_id) ++
+      [148] ++ StdlibAux.low_160_bits_as_bytes a.(destination) ++
+      StdlibAux.rlp_integer a.(nonce) in
+    let n := Z.of_nat (List.length payload) in
+    let prefix := if n <? 56 then [192 + n] else [248; n] in
+    StdlibAux.keccak256 (5 :: (prefix ++ payload)).
+
+  Definition recover (a : t) : option Z :=
+    if a.(s) <=? Stdlib.secp256k1_group_order / 2 then
+      match Stdlib.secp256k1_recover_public_key (signing_hash a)
+              (27 + a.(parity)) a.(r) a.(s) with
+      | Some key => Some (Memory.bytes_as_u256 (Stdlib.ecrecover_output_of_public_key key))
+      | None => None
+      end
+    else None.
+End Authorization.
 
 Module TransactionKind.
   Inductive t : Set :=
   | Legacy
   | AccessList
   | DynamicFee
-  | Blob.
+  | Blob
+  | SetCode (authorizations : list Authorization.t).
 End TransactionKind.
 
 Module Transaction.
@@ -496,6 +534,12 @@ Definition purchase_blob_gas
     fixture.(transaction).(Transaction.caller)
     (transaction_blob_fee_cost fixture).
 
+Definition authorization_cost (transaction : Transaction.t) : Z :=
+  match transaction.(Transaction.kind) with
+  | TransactionKind.SetCode authorizations => 25000 * Z.of_nat (List.length authorizations)
+  | _ => 0
+  end.
+
 Definition state_with_accounts
     (fixture : t)
     (accounts : list (U256.t * Account.t)) : State.t :=
@@ -505,12 +549,12 @@ Definition state_with_accounts
     <| State.accounts := accounts |>
     <| State.original_accounts := original_accounts |>
     <| State.gas :=
-      Gas.execution_gas
+      Z.max 0 (Gas.execution_gas
         fixture.(protocol)
         transaction.(Transaction.is_create)
         transaction.(Transaction.gas_limit)
         transaction.(Transaction.data)
-        transaction.(Transaction.access_list)
+        transaction.(Transaction.access_list) - authorization_cost transaction)
     |>
     <| State.warm_addresses :=
       Gas.initial_warm_addresses
@@ -537,7 +581,7 @@ Definition environment (fixture : t) : Environment.t := {|
   Environment.calldata := transaction_execution_calldata fixture;
   Environment.address := transaction_execution_address fixture;
   Environment.code_name := 0;
-  Environment.chain_id := 1;
+  Environment.chain_id := fixture.(block).(BlockEnv.chain_id);
   Environment.block_coinbase := fixture.(block).(BlockEnv.coinbase);
   Environment.block_gas_limit := fixture.(block).(BlockEnv.gas_limit);
   Environment.block_difficulty := fixture.(block).(BlockEnv.difficulty);
@@ -558,6 +602,13 @@ Definition transaction_has_enough_gas (fixture : t) : bool :=
       transaction.(Transaction.is_create)
       transaction.(Transaction.data)
       transaction.(Transaction.access_list) in
+  let minimum := match transaction.(Transaction.kind) with
+    | TransactionKind.SetCode _ =>
+      Z.max minimum (Gas.intrinsic_transaction_cost fixture.(protocol)
+        transaction.(Transaction.is_create) transaction.(Transaction.data)
+        transaction.(Transaction.access_list) + authorization_cost transaction)
+    | _ => minimum
+    end in
   (minimum <=? transaction.(Transaction.gas_limit)) &&
   (transaction.(Transaction.gas_limit) <=? fixture.(block).(BlockEnv.gas_limit)).
 
@@ -572,6 +623,7 @@ Definition transaction_kind_supported (fixture : t) : bool :=
   match fixture.(transaction).(Transaction.kind) with
   | TransactionKind.Legacy => true
   | TransactionKind.AccessList => Gas.is_berlin_or_later fixture.(protocol)
+  | TransactionKind.SetCode _ => Gas.is_prague_or_later fixture.(protocol)
   | TransactionKind.DynamicFee => Gas.is_london_or_later fixture.(protocol)
   | TransactionKind.Blob => Protocol.has_cancun_opcodes fixture.(protocol)
   end.
@@ -582,7 +634,8 @@ Definition transaction_sender_has_no_code (fixture : t) : bool :=
     match Dict.get
         pre_state.(State.accounts)
         fixture.(transaction).(Transaction.caller) with
-    | Some sender => negb (account_has_code sender)
+    | Some sender => negb (account_has_code sender) ||
+        match delegation_target fixture.(protocol) sender with Some _ => true | None => false end
     | None => true
     end
   else
@@ -596,7 +649,7 @@ Definition transaction_nonce_matches_sender (fixture : t) : bool :=
 
 Definition transaction_priority_fee_valid (fixture : t) : bool :=
   match fixture.(transaction).(Transaction.kind) with
-  | TransactionKind.DynamicFee | TransactionKind.Blob =>
+  | TransactionKind.DynamicFee | TransactionKind.Blob | TransactionKind.SetCode _ =>
     fixture.(transaction).(Transaction.priority_fee_cap) <=?
       fixture.(transaction).(Transaction.gas_fee_cap)
   | _ => true
@@ -677,6 +730,57 @@ Definition state_after_sender_nonce (fixture : t) : option State.t :=
   | Some accounts => Some (pre_state <| State.accounts := accounts |>)
   end.
 
+Definition apply_authorization (fixture : t) (state : State.t) (a : Authorization.t) : State.t :=
+  if ((a.(Authorization.chain_id) =? 0) ||
+      (a.(Authorization.chain_id) =? fixture.(block).(BlockEnv.chain_id))) &&
+      (a.(Authorization.nonce) <? max_sender_nonce) then
+    match Authorization.recover a with
+    | None => state
+    | Some signer =>
+      let '(_, state) := Gas.warm_address signer state in
+      let account := match Dict.get state.(State.accounts) signer with
+                     | None => empty_call_account 0 | Some acct => acct end in
+      let can_delegate := negb (account_has_code account) ||
+        match delegation_target fixture.(protocol) account with Some _ => true | None => false end in
+      if can_delegate && (account.(Account.nonce) =? a.(Authorization.nonce)) then
+        let target := a.(Authorization.destination) in
+        let code := if target =? 0 then [] else
+          [239; 1; 0] ++ StdlibAux.low_160_bits_as_bytes target in
+        let updated := account <| Account.nonce := account.(Account.nonce) + 1 |>
+          <| Account.code := 0 |> <| Account.codedata := code |> in
+        state <| State.accounts := Dict.declare_or_assign state.(State.accounts) signer updated |>
+          <| State.gas_refund := state.(State.gas_refund) +
+              (if Gas.account_empty account then 0 else 12500) |>
+      else state
+    end
+  else state.
+
+Definition prepare_delegations (fixture : t) (state : State.t) : State.t :=
+  if Gas.is_prague_or_later fixture.(protocol) then
+    let tx := fixture.(transaction) in
+    let state := match tx.(Transaction.kind) with
+      | TransactionKind.SetCode entries => List.fold_left (apply_authorization fixture) entries state
+      | _ => state end in
+    if tx.(Transaction.is_create) then state else
+    match Dict.get state.(State.accounts) tx.(Transaction.to) with
+    | Some account =>
+      match delegation_target fixture.(protocol) account with
+      | Some target => snd (Gas.warm_address target state)
+      | None => state end
+    | None => state end
+  else state.
+
+Definition authorization_list_error (tx : Transaction.t) : option string :=
+  match tx.(Transaction.kind) with
+  | TransactionKind.SetCode entries =>
+    if tx.(Transaction.is_create) then Some "invalid transaction: set-code transaction cannot create contract"
+    else match entries with
+    | [] => Some "invalid transaction: empty authorization list"
+    | _ => if List.forallb Authorization.well_formed entries then None
+           else Some "invalid transaction: malformed authorization tuple"
+    end
+  | _ => None end.
+
 Definition state_after_gas_purchase (fixture : t) : option State.t :=
   match state_after_sender_nonce fixture with
   | None => None
@@ -688,7 +792,7 @@ Definition state_after_gas_purchase (fixture : t) : option State.t :=
     | Some accounts =>
       match purchase_blob_gas accounts fixture with
       | None => None
-      | Some accounts => Some (nonce_state <| State.accounts := accounts |>)
+      | Some accounts => Some (prepare_delegations fixture (nonce_state <| State.accounts := accounts |>))
       end
     end
   end.
@@ -732,6 +836,14 @@ Definition frame (fixture : t) : Frame.t :=
     else
       code_at fixture.(pre) fixture.(transaction).(Transaction.to)
   ).
+
+Definition call_frame (fixture : t) (state : State.t) : Frame.t :=
+  if Gas.is_prague_or_later fixture.(protocol) then
+    match Dict.get state.(State.accounts) fixture.(transaction).(Transaction.to) with
+    | Some account => make_frame (account_code_bytes (executable_account fixture.(protocol) state account))
+    | None => make_frame []
+    end
+  else frame fixture.
 
 Definition rollback_persistent_state (before after : State.t) : State.t :=
   after
@@ -814,7 +926,8 @@ Definition finalize_successful_transaction
 Definition finalize_exceptional_transaction
     (fixture : t)
     (state : State.t) : State.t :=
-  finalize_transaction_with_remaining_gas fixture 0 state.
+  let consumed := state <| State.gas := 0 |> in
+  finalize_transaction_with_remaining_gas fixture (remaining_transaction_gas fixture consumed) consumed.
 
 Definition deploy_created_code
     (fixture : t)
@@ -921,7 +1034,10 @@ Definition run (fixture : t) : Step.t * State.t :=
   else if negb (transaction_kind_supported fixture) then
     (Step.Error "invalid transaction: transaction type not supported by protocol",
       pre_transaction_state fixture)
-  else if negb (transaction_sender_has_no_code fixture) then
+  else match authorization_list_error fixture.(transaction) with
+  | Some error =>
+    (Step.Error error, pre_transaction_state fixture)
+  | None => if negb (transaction_sender_has_no_code fixture) then
     (Step.Error "invalid transaction: sender account has code",
       pre_transaction_state fixture)
   else if negb (transaction_sender_nonce_not_max fixture) then
@@ -1005,10 +1121,11 @@ Definition run (fixture : t) : Step.t * State.t :=
 	            fixture.(steps)
 	            fixture.(codes)
 	            (environment fixture)
-	            (frame fixture)
+	            (call_frame fixture before)
             before in
         rollback_top_level_exception fixture rollback_base result
       end
+  end
   end.
 
 Definition state_after (result : Step.t * State.t) : State.t :=
