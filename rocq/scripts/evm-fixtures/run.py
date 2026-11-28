@@ -124,7 +124,7 @@ def compile_suite(root, name, files, jobs, shard, shards):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("smoke", "full", "probes", "probes-archive", "osaka"))
+    parser.add_argument("mode", choices=("smoke", "full", "probes", "osaka"))
     args = parser.parse_args()
     jobs = int(os.environ.get("EVM_FIXTURE_JOBS", 1))
     shard = int(os.environ.get("EVM_FIXTURE_SHARD", 0))
@@ -138,12 +138,9 @@ def main():
         fixtures = Path(tmp)
         extract_fixtures(fixtures, osaka=args.mode == "osaka")
         failed = 0
-        suites = {"probes": PROBES, "probes-archive": PROBES, "osaka": ("GeneratedOsaka",)}.get(args.mode, ("Generated",))
+        suites = {"probes": PROBES, "osaka": ("GeneratedOsaka",)}.get(args.mode, ("Generated",))
         for name in suites:
-            archive = args.mode == "probes-archive"
-            files = generate(fixtures, root / name, name, args.mode == "smoke", archive)
-            if archive:
-                continue
+            files = generate(fixtures, root / name, name, args.mode == "smoke")
             failed += compile_suite(root, name, files, jobs, shard, shards)
     return int(bool(failed))
 

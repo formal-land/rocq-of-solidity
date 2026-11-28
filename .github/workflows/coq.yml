@@ -58,7 +58,6 @@ jobs:
               export EVM_FIXTURE_JOBS=2
               if [ "${{ matrix.shard }}" = 0 ]; then
                 make evm-fixtures-osaka
-                make evm-fixtures-probes-archive
               fi
               EVM_FIXTURE_SHARD=${{ matrix.shard }} EVM_FIXTURE_SHARDS=32 make evm-fixtures-full evm-fixtures-probes
             else

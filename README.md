@@ -104,7 +104,6 @@ Run these fixture targets from `rocq/RocqOfSolidity/` under `opam exec`.
 | `make evm-fixtures-full` | All 39,476 cases in the imported manifest |
 | `make evm-fixtures-osaka` | 1,231 official Osaka state tests from execution-specs tests@v21.0.0 |
 | `make evm-fixtures-probes` | 280 precompile probes and 606 static-call probes |
-| `make evm-fixtures-probes-archive` | Regenerate the original 886 proof sources and verify both fork digests |
 
 The main, smoke and probe targets use the EEST v5.4.0 stable archive. The
 Osaka target reads all 1,231 post-states in the release’s Osaka-specific
@@ -118,11 +117,11 @@ proofs. Each compiler process has a 6 GiB address-space limit, up to 128 MiB of 
 and a 15-minute timeout. The default is one worker. Set `EVM_FIXTURE_JOBS` to increase parallelism
 when sufficient memory is available. Manually running the **Rocq** workflow
 checks the full historical suite and the corrected probes in 32 shards. Shard zero
-also checks the Osaka suite and reproduces the archived probes.
+also checks the Osaka suite.
 
 The historical suites use inclusive ranges in the archive’s sorted JSON path
 order, followed by each JSON object’s original test, fork, and post order.
-The main and archive digests come from the fixture trees at fork commit `40651b12f8`.
+The main suite digest comes from the fixture tree at fork commit `40651b12f8`.
 The Osaka suite traverses JSON files in sorted path order and reads their Osaka post-states.
 Each suite SHA-256 covers its case filenames and contents in sorted filename
 order. The probe manifests import their own modules. The executable probe target uses VM
