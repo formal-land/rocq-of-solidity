@@ -7,3 +7,6 @@
 [submodule "deps/fmtlib"]
 	path = deps/fmtlib
 	url = https://github.com/fmtlib/fmt.git
+[submodule "deps/midnight"]
+	path = deps/midnight
+	url = https://github.com/morpho-org/midnight.git

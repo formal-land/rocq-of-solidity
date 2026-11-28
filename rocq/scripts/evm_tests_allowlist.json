@@ -1,0 +1,48 @@
+{
+  "fixture_release": "ethereum/execution-spec-tests v5.4.0 fixtures_stable.tar.gz",
+  "default_steps": 1000,
+  "cases": [
+    {
+      "id": "frontier_push1",
+      "file": "fixtures/state_tests/frontier/opcodes/test_push.json",
+      "test": "tests/frontier/opcodes/test_push.py::test_push[fork_Berlin-state_test-PUSH1]",
+      "fork": "Berlin",
+      "post_index": 0
+    },
+    {
+      "id": "frontier_dup1",
+      "file": "fixtures/state_tests/frontier/opcodes/test_dup.json",
+      "test": "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-evm_code_type_LEGACY-state_test-DUP1]",
+      "fork": "Berlin",
+      "post_index": 0
+    },
+    {
+      "id": "frontier_swap1",
+      "file": "fixtures/state_tests/frontier/opcodes/test_swap.json",
+      "test": "tests/frontier/opcodes/test_swap.py::test_swap[fork_Berlin-state_test-SWAP1]",
+      "fork": "Berlin",
+      "post_index": 0
+    },
+    {
+      "id": "frontier_calldatasize_tx_16",
+      "file": "fixtures/state_tests/frontier/opcodes/test_calldatasize.json",
+      "test": "tests/frontier/opcodes/test_calldatasize.py::test_calldatasize[fork_Berlin-state_test-calldata_source_tx-args_size_16]",
+      "fork": "Berlin",
+      "post_index": 0
+    },
+    {
+      "id": "frontier_calldataload_tx_two_bytes",
+      "file": "fixtures/state_tests/frontier/opcodes/test_calldataload.json",
+      "test": "tests/frontier/opcodes/test_calldataload.py::test_calldataload[fork_Berlin-state_test-calldata_source_tx-two_bytes]",
+      "fork": "Berlin",
+      "post_index": 0
+    },
+    {
+      "id": "istanbul_chainid",
+      "file": "fixtures/state_tests/istanbul/eip1344_chainid/test_chainid.json",
+      "test": "tests/istanbul/eip1344_chainid/test_chainid.py::test_chainid[fork_Istanbul-typed_transaction_0-state_test]",
+      "fork": "Istanbul",
+      "post_index": 0
+    }
+  ]
+}

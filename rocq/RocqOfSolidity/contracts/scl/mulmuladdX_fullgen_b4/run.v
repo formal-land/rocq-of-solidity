@@ -313,14 +313,16 @@ Module HighLow.
       destruct (Z.land_nonneg a b).
       lia.
     }
+    change (128 >=? 256) with false.
+    cbv iota.
+    pose proof (H_test_high := high_merge_eq).
+    unfold high, merge in H_test_high.
+    repeat rewrite H_test_high by (unfold U128.Valid.t; lia).
     repeat rewrite H_land_eq by lia.
     repeat rewrite <- Arith2.Z_testbit_alt by lia.
     pose proof (H_test_low := test_bit_merge_low_eq).
     unfold merge in H_test_low.
     repeat rewrite H_test_low by (unfold U128.Valid.t; lia).
-    pose proof (H_test_high := high_merge_eq).
-    unfold high, merge in H_test_high.
-    repeat rewrite H_test_high by (unfold U128.Valid.t; lia).
     repeat destruct (Z.testbit _ _); reflexivity.
   Qed.
 End HighLow.

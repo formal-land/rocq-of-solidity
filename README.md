@@ -89,6 +89,56 @@ To build the tests, you need to:
 
 We do not support yet all the semantic tests but around 90% and are working on the remaining ones.
 
+### Run the Rocq tests
+
+With the opam dependencies installed, `make -C rocq/RocqOfSolidity` builds the
+project, the handwritten EVM tests, and the Midnight proofs offline. From
+`rocq/`, run `opam exec -- python3 scripts/tests_compile.py` to check the
+Solidity-derived tests.
+
+Run these fixture targets from `rocq/RocqOfSolidity/` under `opam exec`.
+
+| Target | Ethereum cases |
+| --- | --- |
+| `make evm-fixtures-smoke` | Six allowlisted cases used in pull requests |
+| `make evm-fixtures-full` | All 39,476 cases in the imported manifest |
+| `make evm-fixtures-osaka` | 1,231 official Osaka state tests from execution-specs tests@v21.0.0 |
+| `make evm-fixtures-probes` | 280 precompile probes and 606 static-call probes |
+
+The main, smoke and probe targets use the EEST v5.4.0 stable archive. The
+Osaka target reads all 1,231 post-states in the release’s Osaka-specific
+state-test directory. It checks transaction gas and blob limits, MODEXP pricing
+and operand sizes, CLZ, P-256 signatures, and EIP-7702 authorization lists.
+For new Osaka state tests, the generator reads the current excess blob gas
+or derives it from parent-header fields using the EIP-7918 reserve price.
+Each target verifies its download or a local copy supplied through `EEST_ARCHIVE`. Generated modules and per-case JSONL
+results are in `build/evm-fixtures/`. Rerunning a target resumes successful
+proofs. Each compiler process has a 6 GiB address-space limit, up to 128 MiB of stack,
+and a 15-minute timeout. The default is one worker. Set `EVM_FIXTURE_JOBS` to increase parallelism
+when sufficient memory is available. Manually running the **Rocq** workflow
+checks the full historical suite and the corrected probes in 32 shards. Shard zero
+also checks the Osaka suite.
+
+The historical suites use inclusive ranges in the archive’s sorted JSON path
+order, followed by each JSON object’s original test, fork, and post order.
+The main suite digest comes from the fixture tree at fork commit `40651b12f8`.
+The Osaka suite traverses JSON files in sorted path order and reads their Osaka post-states.
+Each suite SHA-256 covers its case filenames and contents in sorted filename
+order. The probe manifests import their own modules. The executable probe target uses VM
+reduction for the four loop-and-revert cases. Ten MODEXP cases expect an
+out-of-gas execution outcome. Independent replay of their signed transactions
+under Cancun and Prague verified that outcome and each official post-state
+root. Eight transactions called the precompile directly and two called a
+contract. The case identifiers are recorded in `suites.json`. To reproduce the reference
+results, run `rocq/scripts/evm-fixtures/check_modexp_reference.py` using the
+pinned execution-specs Python environment, passing the directory that contains
+the extracted `fixtures/` tree. It prints the gas used, outcome, and verified
+state root for all ten discrepancies and ten successful controls.
+[Reference implementation](https://github.com/ethereum/execution-specs/tree/faf66377663259411f7c150f5490cbac683d3cc9)
+
+Each transaction frame uses its available gas to bound opcode execution. The
+fixture’s step hint supplies fuel for recursive calls and Solidity primitives.
+
 ## 📚 Example
 
 Here is what the Rocq translation looks like for an example of Solidity code:

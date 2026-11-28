@@ -15,13 +15,9 @@ Definition codes : list Code.t :=
   semanticTests.libraries.mapping_returns_in_library.Test.codes.
 
 Module Constructor.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := [];
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := constructor_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      ([]) 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 constructor_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     let address := environment.(Environment.address) in
@@ -30,7 +26,8 @@ Module Constructor.
       Account.nonce := 1;
       Account.code := constructor_code.(Code.hex_name);
       Account.codedata := Memory.hex_string_as_bytes "";
-      Account.storage := Memory.empty;
+      Account.storage := Storage.empty;
+      Account.storage_keys := [];
       Account.immutables := [];
     |} in
     State.init
@@ -58,13 +55,9 @@ End Constructor.
 
 (* // set(bool,uint256,uint256): true, 1, 42 -> 0 *)
 Module Step1.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002a";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002a") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -90,13 +83,9 @@ End Step1.
 
 (* // set(bool,uint256,uint256): true, 2, 84 -> 0 *)
 Module Step2.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000054";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000054") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -122,13 +111,9 @@ End Step2.
 
 (* // set(bool,uint256,uint256): true, 21, 7 -> 0 *)
 Module Step3.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000150000000000000000000000000000000000000000000000000000000000000007";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000150000000000000000000000000000000000000000000000000000000000000007") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -154,13 +139,9 @@ End Step3.
 
 (* // set(bool,uint256,uint256): false, 1, 10 -> 0 *)
 Module Step4.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000a";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000a") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -186,13 +167,9 @@ End Step4.
 
 (* // set(bool,uint256,uint256): false, 2, 11 -> 0 *)
 Module Step5.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000b";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000b") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -218,13 +195,9 @@ End Step5.
 
 (* // set(bool,uint256,uint256): false, 21, 12 -> 0 *)
 Module Step6.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015000000000000000000000000000000000000000000000000000000000000000c";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015000000000000000000000000000000000000000000000000000000000000000c") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -250,13 +223,9 @@ End Step6.
 
 (* // get(bool,uint256): true, 0 -> 0 *)
 Module Step7.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -282,13 +251,9 @@ End Step7.
 
 (* // get(bool,uint256): true, 1 -> 0x2a *)
 Module Step8.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -314,13 +279,9 @@ End Step8.
 
 (* // get(bool,uint256): true, 2 -> 0x54 *)
 Module Step9.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -346,13 +307,9 @@ End Step9.
 
 (* // get(bool,uint256): true, 21 -> 7 *)
 Module Step10.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -378,13 +335,9 @@ End Step10.
 
 (* // get_a(uint256): 0 -> 0 *)
 Module Step11.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -410,13 +363,9 @@ End Step11.
 
 (* // get_a(uint256): 1 -> 0x2a *)
 Module Step12.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -442,13 +391,9 @@ End Step12.
 
 (* // get_a(uint256): 2 -> 0x54 *)
 Module Step13.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -474,13 +419,9 @@ End Step13.
 
 (* // get_a(uint256): 21 -> 7 *)
 Module Step14.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -506,13 +447,9 @@ End Step14.
 
 (* // get(bool,uint256): false, 0 -> 0 *)
 Module Step15.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -538,13 +475,9 @@ End Step15.
 
 (* // get(bool,uint256): false, 1 -> 10 *)
 Module Step16.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -570,13 +503,9 @@ End Step16.
 
 (* // get(bool,uint256): false, 2 -> 11 *)
 Module Step17.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -602,13 +531,9 @@ End Step17.
 
 (* // get(bool,uint256): false, 21 -> 12 *)
 Module Step18.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -634,13 +559,9 @@ End Step18.
 
 (* // get_b(uint256): 0 -> 0 *)
 Module Step19.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -666,13 +587,9 @@ End Step19.
 
 (* // get_b(uint256): 1 -> 10 *)
 Module Step20.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -698,13 +615,9 @@ End Step20.
 
 (* // get_b(uint256): 2 -> 11 *)
 Module Step21.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -730,13 +643,9 @@ End Step21.
 
 (* // get_b(uint256): 21 -> 12 *)
 Module Step22.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -762,13 +671,9 @@ End Step22.
 
 (* // set(bool,uint256,uint256): true, 1, 21 -> 0x2a *)
 Module Step23.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -794,13 +699,9 @@ End Step23.
 
 (* // set(bool,uint256,uint256): true, 2, 42 -> 0x54 *)
 Module Step24.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000002a";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000002a") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -826,13 +727,9 @@ End Step24.
 
 (* // set(bool,uint256,uint256): true, 21, 14 -> 7 *)
 Module Step25.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015000000000000000000000000000000000000000000000000000000000000000e";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015000000000000000000000000000000000000000000000000000000000000000e") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -858,13 +755,9 @@ End Step25.
 
 (* // set(bool,uint256,uint256): false, 1, 30 -> 10 *)
 Module Step26.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000001e";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000001e") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -890,13 +783,9 @@ End Step26.
 
 (* // set(bool,uint256,uint256): false, 2, 31 -> 11 *)
 Module Step27.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001f";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001f") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -922,13 +811,9 @@ End Step27.
 
 (* // set(bool,uint256,uint256): false, 21, 32 -> 12 *)
 Module Step28.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000150000000000000000000000000000000000000000000000000000000000000020";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "583362cf000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000150000000000000000000000000000000000000000000000000000000000000020") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -954,13 +839,9 @@ End Step28.
 
 (* // get_a(uint256): 0 -> 0 *)
 Module Step29.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -986,13 +867,9 @@ End Step29.
 
 (* // get_a(uint256): 1 -> 0x15 *)
 Module Step30.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1018,13 +895,9 @@ End Step30.
 
 (* // get_a(uint256): 2 -> 0x2a *)
 Module Step31.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1050,13 +923,9 @@ End Step31.
 
 (* // get_a(uint256): 21 -> 14 *)
 Module Step32.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "2489ba8e0000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1082,13 +951,9 @@ End Step32.
 
 (* // get(bool,uint256): true, 0 -> 0 *)
 Module Step33.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1114,13 +979,9 @@ End Step33.
 
 (* // get(bool,uint256): true, 1 -> 0x15 *)
 Module Step34.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1146,13 +1007,9 @@ End Step34.
 
 (* // get(bool,uint256): true, 2 -> 0x2a *)
 Module Step35.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1178,13 +1035,9 @@ End Step35.
 
 (* // get(bool,uint256): true, 21 -> 14 *)
 Module Step36.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1210,13 +1063,9 @@ End Step36.
 
 (* // get_b(uint256): 0 -> 0 *)
 Module Step37.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1242,13 +1091,9 @@ End Step37.
 
 (* // get_b(uint256): 1 -> 0x1e *)
 Module Step38.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1274,13 +1119,9 @@ End Step38.
 
 (* // get_b(uint256): 2 -> 0x1f *)
 Module Step39.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1306,13 +1147,9 @@ End Step39.
 
 (* // get_b(uint256): 21 -> 0x20 *)
 Module Step40.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "19aa280e0000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1338,13 +1175,9 @@ End Step40.
 
 (* // get(bool,uint256): false, 0 -> 0 *)
 Module Step41.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1370,13 +1203,9 @@ End Step41.
 
 (* // get(bool,uint256): false, 1 -> 0x1e *)
 Module Step42.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1402,13 +1231,9 @@ End Step42.
 
 (* // get(bool,uint256): false, 2 -> 0x1f *)
 Module Step43.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init
@@ -1434,13 +1259,9 @@ End Step43.
 
 (* // get(bool,uint256): false, 21 -> 0x20 *)
 Module Step44.
-  Definition environment : Environment.t :={|
-    Environment.caller := 0x1212121212121212121212121212120000000012;
-    Environment.callvalue := 0;
-    Environment.calldata := Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015";
-    Environment.address := 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650;
-    Environment.code_name := deployed_code.(Code.hex_name);
-  |}.
+  Definition environment : Environment.t :=
+    Environment.solidity_test 0x1212121212121212121212121212120000000012 0
+      (Memory.hex_string_as_bytes "eabd66d400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015") 0xe1e163b29f5bccb3764b5534ce0e2c02bd4fe650 deployed_code.(Code.hex_name).
 
   Definition initial_state : State.t :=
     State.init

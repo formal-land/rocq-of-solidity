@@ -1,6 +1,7 @@
 name: Rocq
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "develop" ]
   pull_request:
@@ -11,41 +12,84 @@ env:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    name: ${{ github.event_name == 'workflow_dispatch' && format('Full fixture shard {0}', matrix.shard) || 'build' }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]' || '[0]') }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - uses: actions/cache@v5
+      with:
+        path: .cache/rocq-of-solidity
+        key: eest-stable-92cf1b47ad12fb27163261fc3c1cea5df72439cab507983d06b56c94f8741909
     - name: Download Git submodules
       run: git submodule update --init --recursive
+    - name: Compile the Solidity test emitter
+      if: matrix.shard == 0
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake libboost-filesystem-dev libboost-program-options-dev libboost-test-dev
+        cmake -S . -B build/solidity-emitter -DCMAKE_BUILD_TYPE=Release
+        make -C build/solidity-emitter/test libsolidity/SemanticTest.cpp.o
     - uses: coq-community/docker-coq-action@v1
       with:
         custom_image: coqorg/coq:8.20-ocaml-4.14-flambda
         custom_script: |
           startGroup "Install dependencies"
-            sudo apt-get update
-            sudo apt-get install -y cmake libboost-all-dev jq
-            sudo ln -s `which python3` /usr/bin/python
+            mkdir -p build .cache || sudo mkdir -p build .cache
+            sudo chown -R "$(whoami)" rocq build .cache
             opam install -y --deps-only rocq/RocqOfSolidity/rocq-of-solidity.opam
           endGroup
-          startGroup "Build"
-            sudo chown -R $(whoami) .
-            mkdir build
-            cd build
-            cmake ..
-            # make
-            cd ..
-          endGroup
-          startGroup "Translate contracts"
-            # We cannot do it as we need to have solc compiled and it takes too long
-            cd rocq/
-            cd ..
-          endGroup
           startGroup "Check that the diff is empty (excluding submodules)"
-            git -c color.ui=always diff --exit-code --ignore-submodules=dirty
+            git -c safe.directory="$PWD" -c color.ui=always diff --exit-code --ignore-submodules=dirty
           endGroup
+          export XDG_CACHE_HOME="$PWD/.cache"
           startGroup "Compile Coq project"
             cd rocq/RocqOfSolidity
             make
+            python3 ../scripts/evm_tests_generate_test.py
+            if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+              export EVM_FIXTURE_JOBS=2
+              if [ "${{ matrix.shard }}" = 0 ]; then
+                make evm-fixtures-osaka
+              fi
+              EVM_FIXTURE_SHARD=${{ matrix.shard }} EVM_FIXTURE_SHARDS=32 make evm-fixtures-full evm-fixtures-probes
+            else
+              make evm-fixtures-smoke
+            fi
             cd ../..
           endGroup
+    - name: Report fixture results
+      if: always()
+      shell: python
+      run: |
+        import json
+        import os
+        from collections import Counter
+        from pathlib import Path
+
+        for report in Path("build/evm-fixtures").glob("*/*.jsonl"):
+            cases = [json.loads(line) for line in report.read_text().splitlines()]
+            counts = Counter(case["status"] for case in cases)
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                print(f"### {report.stem}\n", file=summary)
+                print(f"{counts['passed']} passed, {counts['failed']} failed, "
+                      f"{counts['timeout']} timed out.\n", file=summary)
+                for case in cases:
+                    if case["status"] != "passed":
+                        print(f"- {case['status']} `{case['case']}`", file=summary)
+                        print(f"::error::{case['status']} {case['case']}")
+    - uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: evm-fixture-results-${{ matrix.shard }}
+        path: |
+          build/evm-fixtures/*/*.jsonl
+          build/evm-fixtures/*/*/*.log
+        if-no-files-found: ignore

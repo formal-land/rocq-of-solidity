@@ -245,3 +245,17 @@ rewrite List.length_skipn.
 cbn in EnoughFuel.
 lia.
 Qed.
+
+(** Scan each byte once, including PUSH immediates. *)
+Definition valid_jump_destinations (code : list byte) : list N :=
+  valid_jump_destinations_from_4 code 0 0.
+
+Lemma valid_jump_destinations_correct (code : list byte) :
+  valid_jump_destinations code =
+  paper_valid_jump_destinations_from code 0 (S (length code)).
+Proof.
+  unfold valid_jump_destinations.
+  rewrite (valid_jump_destinations_from_4_ok _ _ (S (length code))) by lia.
+  rewrite (valid_jump_destinations_from_3_ok code 0 _ code eq_refl).
+  symmetry. apply valid_jump_destinations_from_2_ok.
+Qed.

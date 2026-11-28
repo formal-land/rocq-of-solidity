@@ -774,13 +774,9 @@ bool SemanticTest::deploy(
 	outputFile << "  " << requirePathPrefix() << "." << lastContractName << ".codes." << std::endl;
 	outputFile << std::endl;
 	outputFile << "Module Constructor." << std::endl;
-	outputFile << "  Definition environment : Environment.t :={|" << std::endl;
-	outputFile << "    Environment.caller := 0x" << m_sender << ";" << std::endl;
-	outputFile << "    Environment.callvalue := " << _value << ";" << std::endl;
-	outputFile << "    Environment.calldata := [];" << std::endl;
-	outputFile << "    Environment.address := 0x" << m_contractAddress << ";" << std::endl;
-	outputFile << "    Environment.code_name := constructor_code.(Code.hex_name);" << std::endl;
-	outputFile << "  |}." << std::endl;
+	outputFile << "  Definition environment : Environment.t :=" << std::endl;
+	outputFile << "    Environment.solidity_test 0x" << m_sender << " " << _value << std::endl;
+	outputFile << "      ([]) 0x" << m_contractAddress << " constructor_code.(Code.hex_name)." << std::endl;
 	outputFile << std::endl;
 	outputFile << "  Definition initial_state : State.t :=" << std::endl;
 	outputFile << "    let address := environment.(Environment.address) in" << std::endl;
@@ -790,7 +786,8 @@ bool SemanticTest::deploy(
 	outputFile << "      Account.code := constructor_code.(Code.hex_name);" << std::endl;
 	outputFile << "      Account.codedata := Memory.hex_string_as_bytes \"" << util::toHex(_arguments) << "\";"
 			   << std::endl;
-	outputFile << "      Account.storage := Memory.empty;" << std::endl;
+	outputFile << "      Account.storage := Storage.empty;" << std::endl;
+	outputFile << "      Account.storage_keys := [];" << std::endl;
 	outputFile << "      Account.immutables := [];" << std::endl;
 	outputFile << "    |} in" << std::endl;
 	outputFile << "    State.init" << std::endl;
@@ -880,14 +877,9 @@ void SemanticTest::writeRocqRawCallTest(
 	outputFile << std::endl;
 	outputFile << "(* " << asComment << " *)" << std::endl;
 	outputFile << "Module Step" << testIndex + 1 << "." << std::endl;
-	outputFile << "  Definition environment : Environment.t :={|" << std::endl;
-	outputFile << "    Environment.caller := 0x" << m_sender << ";" << std::endl;
-	outputFile << "    Environment.callvalue := " << _value << ";" << std::endl;
-	outputFile << "    Environment.calldata := Memory.hex_string_as_bytes \"" << util::toHex(_calldata) << "\";"
-			   << std::endl;
-	outputFile << "    Environment.address := 0x" << m_contractAddress << ";" << std::endl;
-	outputFile << "    Environment.code_name := deployed_code.(Code.hex_name);" << std::endl;
-	outputFile << "  |}." << std::endl;
+	outputFile << "  Definition environment : Environment.t :=" << std::endl;
+	outputFile << "    Environment.solidity_test 0x" << m_sender << " " << _value << std::endl;
+	outputFile << "      (Memory.hex_string_as_bytes \"" << util::toHex(_calldata) << "\") 0x" << m_contractAddress << " deployed_code.(Code.hex_name)." << std::endl;
 	outputFile << std::endl;
 	std::string initialState
 		= testIndex == 0 ? "Constructor.final_state" : "Step" + std::to_string(testIndex) + ".state";
