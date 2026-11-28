@@ -25,8 +25,8 @@ Interface-only source files are compilation dependencies. At this commit, `solc`
 emits `null` Yul AST objects for those interfaces, so there is no corresponding
 `shallow.v` for them.
 
-The Solidity snapshot under `core/midnight/solidity-src` matches the pinned
-submodule’s `src` directory. Its license texts are in
+The Solidity sources are in the pinned submodule at `deps/midnight/src`.
+Its license texts are in
 [`deps/midnight/LICENSE`](../../../../../deps/midnight/LICENSE) and
 [`deps/midnight/LICENSE-SECONDARY`](../../../../../deps/midnight/LICENSE-SECONDARY).
 
@@ -35,6 +35,7 @@ submodule’s `src` directory. Its license texts are in
 From the repository root:
 
 ```sh
+git submodule update --init deps/midnight
 /tmp/solc-0.8.34 --ir --ir-ast-json --evm-version osaka -o /tmp/midnight-solc-out $(find deps/midnight/src -name '*.sol')
 ```
 
