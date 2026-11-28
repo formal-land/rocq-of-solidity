@@ -249,6 +249,32 @@ class EvmTestsGenerateTest(unittest.TestCase):
         self.assertEqual(GENERATOR.blob_base_fee(env, "Prague"), 7)
         self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 7)
 
+    def test_pinned_prague_case_uses_prague_blob_price(self):
+        sender = "0x" + "aa" * 20
+        account = {"balance": "0x100000", "nonce": "0x0", "code": "0x", "storage": {}}
+        fixture = {
+            "env": {
+                "currentCoinbase": "0x" + "cc" * 20,
+                "currentGasLimit": "0x100000",
+                "currentNumber": "0x1",
+                "currentTimestamp": "0x2",
+                "currentBaseFee": "0x1",
+                "currentExcessBlobGas": hex(10_000_000),
+            },
+            "pre": {sender: account},
+            "transaction": {
+                "sender": sender, "to": sender, "gasPrice": "0x1",
+                "gasLimit": ["0x5208"], "value": ["0x0"], "data": ["0x"],
+            },
+            "post": {"Prague": [{
+                "indexes": {"data": 0, "gas": 0, "value": 0},
+                "state": {sender: dict(account, balance="0xfadf8", nonce="0x1")},
+            }]},
+        }
+        entry = {"id": "blob_fee", "file": "example.json", "test": "blob_fee", "fork": "Prague"}
+        case = GENERATOR.build_case_from_fixture(1000, entry, fixture, pinned_case=True)
+        self.assertEqual(case.block_blob_base_fee, 7)
+
     def test_osaka_blob_price_from_parent(self):
         env = {"parentExcessBlobGas": hex(10_000_000), "parentBlobGasUsed": "0x0"}
         self.assertEqual(GENERATOR.blob_base_fee(env, "Osaka"), 6)

@@ -845,11 +845,7 @@ def build_case_from_fixture(
         block_difficulty=parse_hex_int(env.get("currentDifficulty", "0x00")),
         block_random=parse_hex_int(env.get("currentRandom", env.get("currentDifficulty", "0x00"))),
         block_base_fee=parse_hex_int(env.get("currentBaseFee", "0x00")),
-        # The archived fork snapshot used Cancun pricing for all fixtures.
-        block_blob_base_fee=(
-            fake_exponential(1, parse_hex_int(env.get("currentExcessBlobGas", "0x0")), 3338477)
-            if pinned_case else blob_base_fee(env, fork)
-        ),
+        block_blob_base_fee=blob_base_fee(env, fork),
         blob_hashes=transaction_blob_hashes(transaction),
         transaction_kind=transaction_kind_constructor(transaction),
         authorizations=transaction_authorizations(transaction),
